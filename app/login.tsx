@@ -1,16 +1,19 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
+import { useAuth } from '../contexts/AuthContext';
+import authService from '../services/authService';
 
 export default function LoginScreen() {
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -18,6 +21,8 @@ export default function LoginScreen() {
   const [showOTP, setShowOTP] = useState(false);
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [otpData, setOtpData] = useState<any>(null);
+  const { refreshUser } = useAuth();
 
   const validatePhoneNumber = (phone: string) => {
     // Remove all non-digit characters
@@ -34,11 +39,27 @@ export default function LoginScreen() {
 
     setIsLoading(true);
     
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      // Format phone number with country code (assuming India +91)
+      const formattedPhoneNumber = `+91${phoneNumber}`;
+      
+      const result = await authService.sendOTP(formattedPhoneNumber);
+      
+      if (result.success) {
+        setOtpData(result.user);
+        setShowOTP(true);
+        // For development, show the OTP in console
+        console.log(`Development OTP: ${result.user.otp}`);
+        Alert.alert('OTP Sent', 'A 6-digit code has been sent to your phone number.');
+      } else {
+        Alert.alert('Error', result.error || 'Failed to send OTP');
+      }
+    } catch (error) {
+      console.error('Error sending OTP:', error);
+      Alert.alert('Error', 'Failed to send OTP. Please try again.');
+    } finally {
       setIsLoading(false);
-      setShowOTP(true);
-    }, 1500);
+    }
   };
 
   const formatPhoneNumber = (text: string) => {
@@ -67,21 +88,44 @@ export default function LoginScreen() {
       return;
     }
 
+    if (!otpData) {
+      Alert.alert('Error', 'No OTP data found. Please try again.');
+      return;
+    }
+
     setIsVerifying(true);
     
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      const result = await authService.verifyOTP(otpData.phoneNumber, otpString);
+      
+      if (result.success) {
+        // Refresh auth context
+        await refreshUser();
+        Alert.alert('Success', 'OTP verified successfully!', [
+          {
+            text: 'Continue',
+            onPress: () => {
+              // Navigate to main app
+              router.replace('/(tabs)');
+            }
+          }
+        ]);
+      } else {
+        Alert.alert('Error', result.error || 'Failed to verify OTP');
+      }
+    } catch (error) {
+      console.error('Error verifying OTP:', error);
+      Alert.alert('Error', 'Failed to verify OTP. Please try again.');
+    } finally {
       setIsVerifying(false);
-      Alert.alert('Success', 'OTP verified successfully!');
-      // Here you would typically navigate to the main app
-      // router.replace('/(tabs)');
-    }, 1500);
+    }
   };
 
   const handleResendOTP = () => {
     setShowOTP(false);
     setOtp(['', '', '', '', '', '']);
-    // Resend OTP logic here
+    setOtpData(null);
+    // This will allow user to enter phone number again and resend OTP
   };
 
   return (
