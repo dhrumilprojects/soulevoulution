@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -23,6 +23,9 @@ export default function LoginScreen() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [otpData, setOtpData] = useState<any>(null);
   const { refreshUser } = useAuth();
+  
+  // Refs for OTP inputs
+  const otpRefs = useRef<TextInput[]>([]);
 
   const validatePhoneNumber = (phone: string) => {
     // Remove all non-digit characters
@@ -71,13 +74,25 @@ export default function LoginScreen() {
   };
 
   const handleOTPChange = (value: string, index: number) => {
+    // Only allow single digit
+    if (value.length > 1) {
+      value = value.slice(-1);
+    }
+    
     const newOtp = [...otp];
     newOtp[index] = value;
     setOtp(newOtp);
 
     // Auto-focus next input
     if (value && index < 5) {
-      // Focus next input (you'll need to add refs for this)
+      otpRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleOTPKeyPress = (key: string, index: number) => {
+    // Handle backspace
+    if (key === 'Backspace' && !otp[index] && index > 0) {
+      otpRefs.current[index - 1]?.focus();
     }
   };
 
@@ -192,9 +207,15 @@ export default function LoginScreen() {
                   {otp.map((digit, index) => (
                     <TextInput
                       key={index}
+                      ref={(ref) => {
+                        if (ref) {
+                          otpRefs.current[index] = ref;
+                        }
+                      }}
                       style={styles.otpInput}
                       value={digit}
                       onChangeText={(value) => handleOTPChange(value, index)}
+                      onKeyPress={({ nativeEvent }) => handleOTPKeyPress(nativeEvent.key, index)}
                       keyboardType="numeric"
                       maxLength={1}
                       textAlign="center"
