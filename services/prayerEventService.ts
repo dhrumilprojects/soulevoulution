@@ -1,18 +1,18 @@
-import { 
-  collection, 
-  addDoc, 
-  doc, 
-  updateDoc, 
-  deleteDoc, 
-  getDocs, 
-  getDoc, 
-  query, 
-  where, 
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
   orderBy,
-  Timestamp 
+  query,
+  Timestamp,
+  updateDoc,
+  where
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../config/firebase';
+import { cloudinaryConfig, getCloudinaryUploadUrl } from '../config/cloudinary';
+import { db } from '../config/firebase';
 
 export interface PrayerEvent {
   id?: string;
@@ -46,11 +46,21 @@ export interface CreatePrayerEventData {
 class PrayerEventService {
   private collectionName = 'prayerEvents';
 
+  private pruneUndefined<T extends Record<string, any>>(obj: T): T {
+    const copy: Record<string, any> = { ...obj };
+    Object.keys(copy).forEach((key) => {
+      if (copy[key] === undefined) {
+        delete copy[key];
+      }
+    });
+    return copy as T;
+  }
+
   async createPrayerEvent(userId: string, eventData: CreatePrayerEventData): Promise<{ success: boolean; eventId?: string; error?: string }> {
     try {
       const now = Timestamp.now();
       
-      const prayerEvent: Omit<PrayerEvent, 'id'> = {
+      const prayerEvent: Omit<PrayerEvent, 'id'> = this.pruneUndefined({
         userId,
         userName: eventData.userName,
         departedName: eventData.departedName,
@@ -64,7 +74,7 @@ class PrayerEventService {
         status: 'pending',
         createdAt: now,
         updatedAt: now,
-      };
+      });
 
       const docRef = await addDoc(collection(db, this.collectionName), prayerEvent);
       
@@ -158,6 +168,27 @@ class PrayerEventService {
     }
   }
 
+  async updatePrayerEventDetails(
+    eventId: string,
+    updates: Partial<Pick<PrayerEvent, 'departedName' | 'date' | 'time' | 'memorialMessage' | 'photo' | 'memoryPhotos' | 'aadharCard' | 'deathCertificate'>>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const docRef = doc(db, this.collectionName, eventId);
+      const safeUpdates = this.pruneUndefined({
+        ...updates,
+        updatedAt: Timestamp.now(),
+      });
+      await updateDoc(docRef, safeUpdates as any);
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating prayer event details:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to update event details',
+      };
+    }
+  }
+
   async deletePrayerEvent(eventId: string): Promise<{ success: boolean; error?: string }> {
     try {
       const docRef = doc(db, this.collectionName, eventId);
@@ -175,16 +206,62 @@ class PrayerEventService {
 
   async uploadImage(imageUri: string, path: string): Promise<{ success: boolean; downloadURL?: string; error?: string }> {
     try {
-      const response = await fetch(imageUri);
-      const blob = await response.blob();
-      
-      const storageRef = ref(storage, path);
-      const snapshot = await uploadBytes(storageRef, blob);
-      const downloadURL = await getDownloadURL(snapshot.ref);
-      
+      if (!cloudinaryConfig.cloudName || !cloudinaryConfig.uploadPreset) {
+        return { success: false, error: 'Cloudinary is not configured' };
+      }
+
+      const uploadUrl = getCloudinaryUploadUrl();
+      if (!uploadUrl) {
+        return { success: false, error: 'Invalid Cloudinary upload URL' };
+      }
+
+      // Parse folder and public_id from the provided path
+      // Example path: "prayer-events/{userId}/photo_123.jpg"
+      let folder = '';
+      let publicId = undefined as string | undefined;
+      if (path && path.includes('/')) {
+        const lastSlash = path.lastIndexOf('/')
+        const folderPart = path.substring(0, lastSlash);
+        const filePart = path.substring(lastSlash + 1);
+        folder = folderPart;
+        if (filePart) {
+          const dotIndex = filePart.lastIndexOf('.')
+          publicId = dotIndex > 0 ? filePart.substring(0, dotIndex) : filePart;
+        }
+      }
+
+      // Build RN-friendly file object
+      const filenameFromPath = path?.substring(path.lastIndexOf('/') + 1) || `upload_${Date.now()}.jpg`;
+      const ext = (filenameFromPath.split('.').pop() || 'jpg').toLowerCase();
+      const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+
+      const formData = new FormData();
+      formData.append('file', {
+        // @ts-ignore React Native FormData file
+        uri: imageUri,
+        name: filenameFromPath,
+        type: mime,
+      } as any);
+      formData.append('upload_preset', cloudinaryConfig.uploadPreset);
+      if (folder) formData.append('folder', folder);
+      if (publicId) formData.append('public_id', publicId);
+
+      const res = await fetch(uploadUrl, {
+        method: 'POST',
+        body: formData as any,
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Cloudinary upload failed with status ${res.status}`);
+      }
+
+      const json = await res.json();
+      const secureUrl: string | undefined = json.secure_url;
+
       return {
         success: true,
-        downloadURL,
+        downloadURL: secureUrl || json.url,
       };
     } catch (error) {
       console.error('Error uploading image:', error);

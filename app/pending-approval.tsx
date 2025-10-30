@@ -1,25 +1,83 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
+import prayerEventService, { PrayerEvent } from '../services/prayerEventService';
 
 export default function PendingApprovalScreen() {
-  const { eventData: eventDataParam } = useLocalSearchParams();
-  
-  // Parse event data from route parameters
-  const eventData = eventDataParam ? JSON.parse(eventDataParam as string) : {
+  const { eventId, eventData: eventDataParam } = useLocalSearchParams();
+
+  const fallback = useMemo(() => ({
     name: 'abc',
     date: '1111-11-11',
     time: '11:11',
     message: '1111',
-  };
+  }), []);
+
+  const initialFromParams = useMemo(() => {
+    try {
+      return eventDataParam ? JSON.parse(eventDataParam as string) : fallback;
+    } catch {
+      return fallback;
+    }
+  }, [eventDataParam, fallback]);
+
+  const [event, setEvent] = useState<PrayerEvent | null>(null);
+  const [loading, setLoading] = useState<boolean>(!!eventId);
+  const [error, setError] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [saving, setSaving] = useState<boolean>(false);
+
+  const [editName, setEditName] = useState<string>('');
+  const [editDate, setEditDate] = useState<string>('');
+  const [editTime, setEditTime] = useState<string>('');
+  const [editMessage, setEditMessage] = useState<string>('');
+  const [editPhotoUri, setEditPhotoUri] = useState<string | null>(null);
+  const [existingMemoryUrls, setExistingMemoryUrls] = useState<string[]>([]);
+  const [newMemoryUris, setNewMemoryUris] = useState<string[]>([]);
+  const [editAadharUri, setEditAadharUri] = useState<string | null>(null);
+  const [editDeathCertUri, setEditDeathCertUri] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchEvent = async () => {
+      if (!eventId) return;
+      setLoading(true);
+      setError(null);
+      const result = await prayerEventService.getPrayerEvent(String(eventId));
+      if (!mounted) return;
+      if (result.success && result.event) {
+        setEvent(result.event);
+        console.log(result.event);
+        setEditName(result.event.departedName || initialFromParams.name);
+        setEditDate(result.event.date || initialFromParams.date);
+        setEditTime(result.event.time || initialFromParams.time);
+        setEditMessage(result.event.memorialMessage || initialFromParams.message);
+        setEditPhotoUri(result.event.photo || null);
+        setExistingMemoryUrls(Array.isArray(result.event.memoryPhotos) ? result.event.memoryPhotos : []);
+        setNewMemoryUris([]);
+        setEditAadharUri(result.event.aadharCard || null);
+        setEditDeathCertUri(result.event.deathCertificate || null);
+      } else {
+        setError(result.error || 'Failed to load event');
+      }
+      setLoading(false);
+    };
+    fetchEvent();
+    return () => { mounted = false; };
+  }, [eventId]);
   const handleGoToDashboard = () => {
     router.replace('/(tabs)');
   };
@@ -37,6 +95,23 @@ export default function PendingApprovalScreen() {
             <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
             <Text style={styles.backButtonText}>Back to Dashboard</Text>
           </TouchableOpacity>
+          {!!event && (
+            <TouchableOpacity
+              style={styles.editButton}
+              onPress={() => {
+                if (!isEditing && event) {
+                  setEditName(event.departedName || '');
+                  setEditDate(event.date || '');
+                  setEditTime(event.time || '');
+                  setEditMessage(event.memorialMessage || '');
+                }
+                setIsEditing(!isEditing);
+              }}
+            >
+              <Ionicons name={isEditing ? 'close' : 'create-outline'} size={18} color="#1A1A1A" />
+              <Text style={styles.editButtonText}>{isEditing ? 'Cancel' : 'Edit'}</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Main Content Card */}
@@ -65,7 +140,16 @@ export default function PendingApprovalScreen() {
             <View style={styles.eventDetailsList}>
               <View style={styles.eventDetailItem}>
                 <Text style={styles.eventDetailLabel}>Name:</Text>
-                <Text style={styles.eventDetailValue}>{eventData?.name || 'abc'}</Text>
+                {isEditing ? (
+                  <TextInput
+                    style={styles.input}
+                    value={editName}
+                    onChangeText={setEditName}
+                    placeholder="Name"
+                  />
+                ) : (
+                  <Text style={styles.eventDetailValue}>{event?.departedName || initialFromParams?.name}</Text>
+                )}
               </View>
               
               <View style={styles.eventDetailItem}>
@@ -73,23 +157,295 @@ export default function PendingApprovalScreen() {
                   <Ionicons name="calendar-outline" size={16} color="#666666" />
                   <Text style={styles.eventDetailLabel}>Date:</Text>
                 </View>
-                <Text style={styles.eventDetailValue}>
-                  {eventData?.date || '1111-11-11'} at {eventData?.time || '11:11'}
-                </Text>
+                {isEditing ? (
+                  <View style={styles.dateTimeRow}>
+                    <TextInput
+                      style={[styles.input, styles.inputHalf]}
+                      value={editDate}
+                      onChangeText={setEditDate}
+                      placeholder="YYYY-MM-DD"
+                    />
+                    <TextInput
+                      style={[styles.input, styles.inputHalf]}
+                      value={editTime}
+                      onChangeText={setEditTime}
+                      placeholder="HH:MM"
+                    />
+                  </View>
+                ) : (
+                  <Text style={styles.eventDetailValue}>
+                    {(event?.date || initialFromParams?.date)} at {(event?.time || initialFromParams?.time)}
+                  </Text>
+                )}
               </View>
               
               <View style={styles.eventDetailItem}>
                 <Text style={styles.eventDetailLabel}>Message:</Text>
-                <Text style={styles.eventDetailValue}>{eventData?.message || '1111'}</Text>
+                {isEditing ? (
+                  <TextInput
+                    style={[styles.input, styles.inputMultiline]}
+                    value={editMessage}
+                    onChangeText={setEditMessage}
+                    placeholder="Message"
+                    multiline
+                  />
+                ) : (
+                  <Text style={styles.eventDetailValue}>{event?.memorialMessage || initialFromParams?.message}</Text>
+                )}
+              </View>
+
+              <View style={styles.mediaBlock}>
+                <View style={styles.mediaHeaderRow}>
+                  <Text style={styles.eventDetailsTitle}>Main Photo</Text>
+                  {isEditing && (
+                    <TouchableOpacity
+                      style={styles.smallButton}
+                      onPress={async () => {
+                        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                        if (!permission.granted) {
+                          Alert.alert('Permission required', 'Please allow photo library access.');
+                          return;
+                        }
+                        const resultPick = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsMultipleSelection: false, quality: 0.8 });
+                        if (!resultPick.canceled && resultPick.assets && resultPick.assets.length > 0) {
+                          setEditPhotoUri(resultPick.assets[0].uri);
+                        }
+                      }}
+                    >
+                      <Text style={styles.smallButtonText}>Change</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {!!(editPhotoUri || event?.photo) && (
+                  <Image source={{ uri: (isEditing ? (editPhotoUri || '') : (event?.photo || '')) }} style={styles.image} resizeMode="cover" />
+                )}
+              </View>
+
+              <View style={styles.mediaBlock}>
+                <View style={styles.mediaHeaderRow}>
+                  <Text style={styles.eventDetailsTitle}>Memories</Text>
+                  {isEditing && (
+                    <TouchableOpacity
+                      style={styles.smallButton}
+                      onPress={async () => {
+                        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                        if (!permission.granted) {
+                          Alert.alert('Permission required', 'Please allow photo library access.');
+                          return;
+                        }
+                        const resultPick = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsMultipleSelection: true, selectionLimit: 10, quality: 0.8 });
+                        if (!resultPick.canceled && resultPick.assets && resultPick.assets.length > 0) {
+                          setNewMemoryUris((prev) => [...prev, ...resultPick.assets.map(a => a.uri)]);
+                        }
+                      }}
+                    >
+                      <Text style={styles.smallButtonText}>Add</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <View style={styles.memoryGrid}>
+                  {existingMemoryUrls.map((rawUri, idx) => {
+                    const uri = String(rawUri).trim();
+                    const key = `existing-${idx}`;
+                    return (
+                      <View key={key} style={styles.memoryItem}>
+                        <Image source={{ uri }} style={styles.memoryImage} resizeMode="cover" />
+                        {isEditing && (
+                          <TouchableOpacity style={styles.removeBadge} onPress={() => {
+                            setExistingMemoryUrls((prev) => prev.filter((_, i) => i !== idx));
+                          }}>
+                            <Text style={styles.removeBadgeText}>×</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })}
+                  {newMemoryUris.map((uri, idx) => {
+                    const key = `new-${idx}`;
+                    return (
+                      <View key={key} style={styles.memoryItem}>
+                        <Image source={{ uri }} style={styles.memoryImage} resizeMode="cover" />
+                        {isEditing && (
+                          <TouchableOpacity style={styles.removeBadge} onPress={() => {
+                            setNewMemoryUris((prev) => prev.filter((_, i) => i !== idx));
+                          }}>
+                            <Text style={styles.removeBadgeText}>×</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={styles.mediaBlock}>
+                <View style={styles.mediaHeaderRow}>
+                  <Text style={styles.eventDetailsTitle}>Aadhar Card</Text>
+                  {isEditing && (
+                    <TouchableOpacity
+                      style={styles.smallButton}
+                      onPress={async () => {
+                        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                        if (!permission.granted) {
+                          Alert.alert('Permission required', 'Please allow photo library access.');
+                          return;
+                        }
+                        const resultPick = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsMultipleSelection: false, quality: 0.8 });
+                        if (!resultPick.canceled && resultPick.assets && resultPick.assets.length > 0) {
+                          setEditAadharUri(resultPick.assets[0].uri);
+                        }
+                      }}
+                    >
+                      <Text style={styles.smallButtonText}>Change</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {!!(editAadharUri || event?.aadharCard) && (
+                  <Image source={{ uri: isEditing ? (editAadharUri || '') : (event?.aadharCard || '') }} style={styles.docImage} resizeMode="contain" />
+                )}
+              </View>
+
+              <View style={styles.mediaBlock}>
+                <View style={styles.mediaHeaderRow}>
+                  <Text style={styles.eventDetailsTitle}>Death Certificate</Text>
+                  {isEditing && (
+                    <TouchableOpacity
+                      style={styles.smallButton}
+                      onPress={async () => {
+                        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                        if (!permission.granted) {
+                          Alert.alert('Permission required', 'Please allow photo library access.');
+                          return;
+                        }
+                        const resultPick = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsMultipleSelection: false, quality: 0.8 });
+                        if (!resultPick.canceled && resultPick.assets && resultPick.assets.length > 0) {
+                          setEditDeathCertUri(resultPick.assets[0].uri);
+                        }
+                      }}
+                    >
+                      <Text style={styles.smallButtonText}>Change</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {!!(editDeathCertUri || event?.deathCertificate) && (
+                  <Image source={{ uri: isEditing ? (editDeathCertUri || '') : (event?.deathCertificate || '') }} style={styles.docImage} resizeMode="contain" />
+                )}
               </View>
             </View>
           </View>
 
-          {/* Action Button */}
-          <TouchableOpacity style={styles.dashboardButton} onPress={handleGoToDashboard}>
-            <Text style={styles.dashboardButtonText}>Go to Dashboard</Text>
-          </TouchableOpacity>
+          {/* Action Buttons */}
+          {isEditing ? (
+            <TouchableOpacity
+              style={[styles.dashboardButton, saving && { opacity: 0.7 }]}
+              onPress={async () => {
+                if (!eventId) return;
+                try {
+                  setSaving(true);
+                  const updates: any = {
+                    departedName: editName?.trim(),
+                    date: editDate?.trim(),
+                    time: editTime?.trim(),
+                    memorialMessage: editMessage?.trim(),
+                  };
+
+                  // Upload changed images to Cloudinary
+                  const userFolder = event?.userId ? `prayer-events/${event.userId}` : `prayer-events/unknown`;
+
+                  if (editPhotoUri && !editPhotoUri.startsWith('http')) {
+                    const res = await prayerEventService.uploadImage(
+                      editPhotoUri,
+                      `${userFolder}/photo_${Date.now()}.jpg`
+                    );
+                    if (!res.success) throw new Error(res.error || 'Failed to upload main photo');
+                    updates.photo = res.downloadURL;
+                  }
+
+                  if (editAadharUri && !editAadharUri.startsWith('http')) {
+                    const res = await prayerEventService.uploadImage(
+                      editAadharUri,
+                      `${userFolder}/aadhar_${Date.now()}.jpg`
+                    );
+                    if (!res.success) throw new Error(res.error || 'Failed to upload Aadhar');
+                    updates.aadharCard = res.downloadURL;
+                  }
+
+                  if (editDeathCertUri && !editDeathCertUri.startsWith('http')) {
+                    const res = await prayerEventService.uploadImage(
+                      editDeathCertUri,
+                      `${userFolder}/death_cert_${Date.now()}.jpg`
+                    );
+                    if (!res.success) throw new Error(res.error || 'Failed to upload Death Certificate');
+                    updates.deathCertificate = res.downloadURL;
+                  }
+
+                  let combinedMemories = [...existingMemoryUrls];
+                  for (const localUri of newMemoryUris) {
+                    if (!localUri.startsWith('http')) {
+                      const res = await prayerEventService.uploadImage(
+                        localUri,
+                        `${userFolder}/memory_${Date.now()}_${Math.random()}.jpg`
+                      );
+                      if (res.success && res.downloadURL) {
+                        combinedMemories.push(res.downloadURL);
+                      } else {
+                        throw new Error(res.error || 'Failed to upload memory photo');
+                      }
+                    } else {
+                      combinedMemories.push(localUri);
+                    }
+                  }
+                  updates.memoryPhotos = combinedMemories;
+
+                  const result = await prayerEventService.updatePrayerEventDetails(String(eventId), updates);
+                  if (result.success) {
+                    setEvent((prev) => prev ? {
+                      ...prev,
+                      departedName: updates.departedName || prev.departedName,
+                      date: updates.date || prev.date,
+                      time: updates.time || prev.time,
+                      memorialMessage: updates.memorialMessage || prev.memorialMessage,
+                      photo: updates.photo || prev.photo,
+                      aadharCard: updates.aadharCard || prev.aadharCard,
+                      deathCertificate: updates.deathCertificate || prev.deathCertificate,
+                      memoryPhotos: updates.memoryPhotos || prev.memoryPhotos,
+                    } : prev);
+                    setNewMemoryUris([]);
+                    setIsEditing(false);
+                    Alert.alert('Saved', 'Prayer meeting updated successfully.');
+                  } else {
+                    Alert.alert('Error', result.error || 'Failed to save changes');
+                  }
+                } catch (e) {
+                  Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save changes');
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator color="#F7C97B" />
+              ) : (
+                <Text style={styles.dashboardButtonText}>Save Changes</Text>
+              )}
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.dashboardButton} onPress={handleGoToDashboard}>
+              <Text style={styles.dashboardButtonText}>Go to Dashboard</Text>
+            </TouchableOpacity>
+          )}
         </View>
+        {loading && (
+          <View style={styles.loadingBanner}>
+            <Text style={styles.loadingText}>Loading event details...</Text>
+          </View>
+        )}
+        {!!error && (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -110,6 +466,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 32,
     paddingTop: 8,
   },
@@ -122,6 +479,21 @@ const styles = StyleSheet.create({
     color: '#1A1A1A',
     marginLeft: 8,
     fontWeight: '500',
+  },
+  editButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+  },
+  editButtonText: {
+    marginLeft: 6,
+    color: '#1A1A1A',
+    fontWeight: '600',
   },
   mainCard: {
     backgroundColor: '#FFFFFF',
@@ -189,6 +561,98 @@ const styles = StyleSheet.create({
   eventDetailsList: {
     gap: 16,
   },
+  mediaBlock: {
+    marginTop: 8,
+    gap: 8,
+  },
+  mediaHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  smallButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#EAEAEA',
+  },
+  smallButtonText: {
+    color: '#1A1A1A',
+    fontWeight: '600',
+  },
+  image: {
+    width: '100%',
+    height: 220,
+    borderRadius: 12,
+    backgroundColor: '#F5F5F5',
+  },
+  memoryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  memoryItem: {
+    width: '48%',
+    marginBottom: 10,
+    position: 'relative',
+  },
+  memoryImage: {
+    width: '100%',
+    height: 180,
+    aspectRatio: 1,
+    borderRadius: 10,
+    backgroundColor: '#F5F5F5',
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#EEE',
+  },
+  removeBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#00000088',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removeBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    lineHeight: 16,
+    fontWeight: '700',
+  },
+  docImage: {
+    width: '100%',
+    height: 260,
+    borderRadius: 12,
+    backgroundColor: '#F9F9F9',
+  },
+  loadingBanner: {
+    marginTop: 16,
+    padding: 12,
+    backgroundColor: '#FFF8E1',
+    borderRadius: 12,
+  },
+  loadingText: {
+    color: '#8D6E63',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  errorBanner: {
+    marginTop: 16,
+    padding: 12,
+    backgroundColor: '#FFE8E8',
+    borderRadius: 12,
+  },
+  errorText: {
+    color: '#F44336',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
   eventDetailItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -206,6 +670,29 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flex: 1,
     textAlign: 'right',
+  },
+  input: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#E6E6E6',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: '#1A1A1A',
+    textAlign: 'right',
+    backgroundColor: '#FFFFFF',
+  },
+  inputMultiline: {
+    minHeight: 90,
+    textAlignVertical: 'top',
+  },
+  dateTimeRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  inputHalf: {
+    flex: 0.48,
   },
   dateRow: {
     flexDirection: 'row',

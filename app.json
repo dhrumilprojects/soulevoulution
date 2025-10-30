@@ -43,6 +43,10 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "CLOUDINARY_CLOUD_NAME": "dpomxki5z",
+      "CLOUDINARY_UPLOAD_PRESET": "soulevolution"
     }
   }
 }

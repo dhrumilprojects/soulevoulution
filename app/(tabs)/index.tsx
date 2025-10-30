@@ -62,6 +62,7 @@ export default function HomeScreen() {
       router.push({
         pathname: '/pending-approval',
         params: {
+          eventId: event.id || '',
           eventData: JSON.stringify({
             name: event.departedName,
             date: event.date,
