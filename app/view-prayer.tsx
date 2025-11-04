@@ -103,6 +103,36 @@ export default function PendingApprovalScreen() {
     return `${hours}:${minutes}`;
   };
 
+  // Check if event is live (within 2 hours after event start time)
+  const isEventLive = (): boolean => {
+    if (!event?.date || !event?.time) return false;
+    
+    try {
+      // Parse event date and time
+      const dateParts = event.date.split('-');
+      const timeParts = event.time.split(':');
+      
+      if (dateParts.length !== 3 || timeParts.length < 2) return false;
+      
+      const eventDateTime = new Date(
+        parseInt(dateParts[0]),
+        parseInt(dateParts[1]) - 1,
+        parseInt(dateParts[2]),
+        parseInt(timeParts[0]),
+        parseInt(timeParts[1])
+      );
+      
+      const now = new Date();
+      const twoHoursLater = new Date(eventDateTime.getTime() + 2 * 60 * 60 * 1000); // Add 2 hours
+      
+      // Check if current time is >= event time and <= event time + 2 hours
+      return now >= eventDateTime && now <= twoHoursLater;
+    } catch (error) {
+      console.error('Error checking event live status:', error);
+      return false;
+    }
+  };
+
   useEffect(() => {
     let mounted = true;
     const fetchEvent = async () => {
@@ -153,7 +183,7 @@ export default function PendingApprovalScreen() {
             <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
             <Text style={styles.backButtonText}>Back to Dashboard</Text>
           </TouchableOpacity>
-          {!!event && (
+          {!!event && event.status === 'pending' && (
             <TouchableOpacity
               style={styles.editButton}
               onPress={() => {
@@ -183,16 +213,57 @@ export default function PendingApprovalScreen() {
           {/* Status Indicator */}
           <View style={styles.statusSection}>
             <View style={styles.clockIcon}>
-              <Ionicons name="time-outline" size={48} color="#666666" />
+              <Ionicons 
+                name={
+                  event?.status === 'approved' ? 'checkmark-circle-outline' : 
+                  event?.status === 'rejected' ? 'close-circle-outline' : 
+                  'time-outline'
+                } 
+                size={48} 
+                color={
+                  event?.status === 'approved' ? '#4CAF50' : 
+                  event?.status === 'rejected' ? '#F44336' : 
+                  '#666666'
+                } 
+              />
             </View>
             
-            <View style={styles.statusTag}>
-              <Text style={styles.statusTagText}>Pending Approval</Text>
+            <View style={[
+              styles.statusTag,
+              event?.status === 'approved' && styles.statusTagApproved,
+              event?.status === 'rejected' && styles.statusTagRejected,
+            ]}>
+              <Text style={[
+                styles.statusTagText,
+                event?.status === 'approved' && styles.statusTagTextApproved,
+                event?.status === 'rejected' && styles.statusTagTextRejected,
+              ]}>
+                {event?.status === 'pending' ? 'Pending Approval' : 
+                 event?.status === 'approved' ? 'Approved' : 'Rejected'}
+              </Text>
             </View>
                         
             <Text style={styles.statusDescription}>
-              Your prayer event is under review. We'll verify your documents and notify you once approved. This usually takes 24-48 hours.
+              {event?.status === 'pending' 
+                ? "Your prayer event is under review. We'll verify your documents and notify you once approved. This usually takes 24-48 hours."
+                : event?.status === 'approved'
+                ? 'Your prayer event has been approved and is now active. You can view all the details below.'
+                : 'Your prayer event has been rejected. Please contact support if you have any questions.'}
             </Text>
+
+            {event?.status === 'approved' && isEventLive() && (
+              <TouchableOpacity
+                style={styles.goLiveButton}
+                onPress={() => {
+                  // TODO: Implement go live functionality
+                  Alert.alert('Go Live', 'Starting the prayer event live stream...');
+                }}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="radio" size={20} color="#FFFFFF" />
+                <Text style={styles.goLiveButtonText}>Go Live</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Event Details Section */}
@@ -644,10 +715,22 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     marginBottom: 16,
   },
+  statusTagApproved: {
+    backgroundColor: '#E8F5E8',
+  },
+  statusTagRejected: {
+    backgroundColor: '#FFE8E8',
+  },
   statusTagText: {
     fontSize: 14,
     color: '#666666',
     fontWeight: '500',
+  },
+  statusTagTextApproved: {
+    color: '#4CAF50',
+  },
+  statusTagTextRejected: {
+    color: '#F44336',
   },
   statusTitle: {
     fontSize: 28,
@@ -662,6 +745,34 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 24,
     letterSpacing: 0.2,
+    marginBottom: 20,
+  },
+  goLiveButton: {
+    backgroundColor: '#F7C97B',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    shadowColor: '#F7C97B',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: '#E6B85C',
+  },
+  goLiveButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+    marginLeft: 8,
+    letterSpacing: 0.5,
   },
   eventDetailsSection: {
     marginBottom: 32,

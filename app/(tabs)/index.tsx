@@ -82,23 +82,18 @@ export default function HomeScreen() {
   };
 
   const handleViewDetails = (event: PrayerEvent) => {
-    if (event.status === 'pending') {
-      router.push({
-        pathname: '/view-prayer',
-        params: {
-          eventId: event.id || '',
-          eventData: JSON.stringify({
-            name: event.departedName,
-            date: event.date,
-            time: event.time,
-            message: event.memorialMessage,
-          }),
-        },
-      });
-    } else {
-      // Navigate to event details screen for approved/rejected events
-      Alert.alert('Event Details', `Event: ${event.departedName}\nStatus: ${event.status}\nDate: ${event.date} at ${event.time}`);
-    }
+    router.push({
+      pathname: '/view-prayer',
+      params: {
+        eventId: event.id || '',
+        eventData: JSON.stringify({
+          name: event.departedName,
+          date: event.date,
+          time: event.time,
+          message: event.memorialMessage,
+        }),
+      },
+    });
   };
 
   useEffect(() => {
