@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -6,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Platform,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -50,6 +52,57 @@ export default function PendingApprovalScreen() {
   const [editAadharUri, setEditAadharUri] = useState<string | null>(null);
   const [editDeathCertUri, setEditDeathCertUri] = useState<string | null>(null);
 
+  // Date and time picker states
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedTime, setSelectedTime] = useState(new Date());
+
+  // Helper functions to parse and format dates
+  const parseDateString = (dateStr: string): Date => {
+    if (!dateStr) return new Date();
+    // Try YYYY-MM-DD format first
+    if (dateStr.includes('-')) {
+      const parts = dateStr.split('-');
+      if (parts.length === 3) {
+        return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+      }
+    }
+    // Try DD/MM/YYYY format
+    if (dateStr.includes('/')) {
+      const parts = dateStr.split('/');
+      if (parts.length === 3) {
+        return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+      }
+    }
+    return new Date(dateStr) || new Date();
+  };
+
+  const parseTimeString = (timeStr: string): Date => {
+    if (!timeStr) return new Date();
+    const parts = timeStr.split(':');
+    if (parts.length >= 2) {
+      const date = new Date();
+      date.setHours(parseInt(parts[0]) || 0);
+      date.setMinutes(parseInt(parts[1]) || 0);
+      return date;
+    }
+    return new Date();
+  };
+
+  const formatDate = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const formatTime = (date: Date): string => {
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    return `${hours}:${minutes}`;
+  };
+
   useEffect(() => {
     let mounted = true;
     const fetchEvent = async () => {
@@ -62,14 +115,19 @@ export default function PendingApprovalScreen() {
         setEvent(result.event);
         console.log(result.event);
         setEditName(result.event.departedName || initialFromParams.name);
-        setEditDate(result.event.date || initialFromParams.date);
-        setEditTime(result.event.time || initialFromParams.time);
+        const eventDate = result.event.date || initialFromParams.date;
+        const eventTime = result.event.time || initialFromParams.time;
+        setEditDate(eventDate);
+        setEditTime(eventTime);
         setEditMessage(result.event.memorialMessage || initialFromParams.message);
         setEditPhotoUri(result.event.photo || null);
         setExistingMemoryUrls(Array.isArray(result.event.memoryPhotos) ? result.event.memoryPhotos : []);
         setNewMemoryUris([]);
         setEditAadharUri(result.event.aadharCard || null);
         setEditDeathCertUri(result.event.deathCertificate || null);
+        // Initialize picker dates
+        setSelectedDate(parseDateString(eventDate));
+        setSelectedTime(parseTimeString(eventTime));
       } else {
         setError(result.error || 'Failed to load event');
       }
@@ -104,6 +162,12 @@ export default function PendingApprovalScreen() {
                   setEditDate(event.date || '');
                   setEditTime(event.time || '');
                   setEditMessage(event.memorialMessage || '');
+                  setSelectedDate(parseDateString(event.date || ''));
+                  setSelectedTime(parseTimeString(event.time || ''));
+                } else {
+                  // Reset picker visibility when canceling
+                  setShowDatePicker(false);
+                  setShowTimePicker(false);
                 }
                 setIsEditing(!isEditing);
               }}
@@ -125,9 +189,7 @@ export default function PendingApprovalScreen() {
             <View style={styles.statusTag}>
               <Text style={styles.statusTagText}>Pending Approval</Text>
             </View>
-            
-            <Text style={styles.statusTitle}>Pending Approval</Text>
-            
+                        
             <Text style={styles.statusDescription}>
               Your prayer event is under review. We'll verify your documents and notify you once approved. This usually takes 24-48 hours.
             </Text>
@@ -159,18 +221,26 @@ export default function PendingApprovalScreen() {
                 </View>
                 {isEditing ? (
                   <View style={styles.dateTimeRow}>
-                    <TextInput
-                      style={[styles.input, styles.inputHalf]}
-                      value={editDate}
-                      onChangeText={setEditDate}
-                      placeholder="YYYY-MM-DD"
-                    />
-                    <TextInput
-                      style={[styles.input, styles.inputHalf]}
-                      value={editTime}
-                      onChangeText={setEditTime}
-                      placeholder="HH:MM"
-                    />
+                    <TouchableOpacity
+                      style={[styles.input, styles.inputHalf, styles.pickerButton]}
+                      onPress={() => {
+                        setSelectedDate(parseDateString(editDate));
+                        setShowDatePicker(true);
+                      }}
+                    >
+                      <Text style={styles.pickerButtonText}>{editDate || 'Select Date'}</Text>
+                      <Ionicons name="calendar-outline" size={18} color="#666666" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.input, styles.inputHalf, styles.pickerButton]}
+                      onPress={() => {
+                        setSelectedTime(parseTimeString(editTime));
+                        setShowTimePicker(true);
+                      }}
+                    >
+                      <Text style={styles.pickerButtonText}>{editTime || 'Select Time'}</Text>
+                      <Ionicons name="time-outline" size={18} color="#666666" />
+                    </TouchableOpacity>
                   </View>
                 ) : (
                   <Text style={styles.eventDetailValue}>
@@ -447,6 +517,50 @@ export default function PendingApprovalScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Date Picker */}
+      {showDatePicker && (
+        <DateTimePicker
+          value={selectedDate}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={(event, date) => {
+            if (Platform.OS === 'android') {
+              setShowDatePicker(false);
+            }
+            if (date && event.type !== 'dismissed') {
+              setSelectedDate(date);
+              setEditDate(formatDate(date));
+            }
+            if (Platform.OS === 'ios' && event.type !== 'dismissed') {
+              // On iOS, keep it open until user confirms
+              setShowDatePicker(false);
+            }
+          }}
+        />
+      )}
+
+      {/* Time Picker */}
+      {showTimePicker && (
+        <DateTimePicker
+          value={selectedTime}
+          mode="time"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={(event, time) => {
+            if (Platform.OS === 'android') {
+              setShowTimePicker(false);
+            }
+            if (time && event.type !== 'dismissed') {
+              setSelectedTime(time);
+              setEditTime(formatTime(time));
+            }
+            if (Platform.OS === 'ios' && event.type !== 'dismissed') {
+              // On iOS, keep it open until user confirms
+              setShowTimePicker(false);
+            }
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -543,7 +657,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   statusDescription: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#666666',
     textAlign: 'center',
     lineHeight: 24,
@@ -693,6 +807,17 @@ const styles = StyleSheet.create({
   },
   inputHalf: {
     flex: 0.48,
+  },
+  pickerButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    textAlign: 'left',
+  },
+  pickerButtonText: {
+    fontSize: 16,
+    color: '#1A1A1A',
+    flex: 1,
   },
   dateRow: {
     flexDirection: 'row',

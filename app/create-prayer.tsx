@@ -3,16 +3,16 @@ import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    Alert,
-    Image,
-    Modal,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  Alert,
+  Image,
+  Modal,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import prayerEventService from '../services/prayerEventService';
@@ -226,7 +226,7 @@ export default function CreatePrayerScreen() {
       if (result.success) {
         // Navigate to pending approval screen with event data
         router.replace({
-          pathname: '/pending-approval',
+          pathname: '/view-prayer',
           params: {
             eventData: JSON.stringify({
               name: formData.departedName,

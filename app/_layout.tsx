@@ -1,3 +1,12 @@
+// Firebase polyfills for React Native
+import 'react-native-get-random-values';
+// Polyfill for TextEncoder/TextDecoder if needed
+if (typeof global.TextEncoder === 'undefined') {
+  const { TextEncoder, TextDecoder } = require('text-encoding');
+  global.TextEncoder = TextEncoder;
+  global.TextDecoder = TextDecoder;
+}
+
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';

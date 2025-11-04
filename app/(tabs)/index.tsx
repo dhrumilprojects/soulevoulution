@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import moment from 'moment';
 import React, { useEffect, useState } from 'react';
 import { Alert, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
@@ -57,10 +58,33 @@ export default function HomeScreen() {
     }
   };
 
+  const formatEventDateTime = (dateStr: string, timeStr: string): string => {
+    try {
+      // Parse date (expecting YYYY-MM-DD format)
+      const dateParts = dateStr.split('-');
+      if (dateParts.length !== 3) return `${dateStr} at ${timeStr}`;
+      
+      // Parse time (expecting HH:MM format)
+      const timeParts = timeStr.split(':');
+      if (timeParts.length < 2) return `${dateStr} at ${timeStr}`;
+      
+      const year = parseInt(dateParts[0]);
+      const month = parseInt(dateParts[1]) - 1; // Month is 0-indexed
+      const day = parseInt(dateParts[2]);
+      const hours = parseInt(timeParts[0]);
+      const minutes = parseInt(timeParts[1]);
+      
+      const dateTime = new Date(year, month, day, hours, minutes);
+      return moment(dateTime).format('MMM D, YYYY • h:mm A');
+    } catch (error) {
+      return `${dateStr} at ${timeStr}`;
+    }
+  };
+
   const handleViewDetails = (event: PrayerEvent) => {
     if (event.status === 'pending') {
       router.push({
-        pathname: '/pending-approval',
+        pathname: '/view-prayer',
         params: {
           eventId: event.id || '',
           eventData: JSON.stringify({
@@ -99,7 +123,7 @@ export default function HomeScreen() {
             <Text style={styles.title}>Dashboard</Text>
             <Text style={styles.subtitle}>Manage your prayer events</Text>
           </View>
-          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+          <TouchableOpacity style={styles.logoutButton} onPress={() => handleLogout()}>
             <Ionicons name="log-out-outline" size={16} color="#333333" />
             <Text style={styles.logoutText}>Logout</Text>
           </TouchableOpacity>
@@ -141,36 +165,35 @@ export default function HomeScreen() {
                 <View key={event.id} style={styles.eventCard}>
                   <View style={styles.eventContent}>
                     <View style={styles.eventHeader}>
-                      <Text style={styles.eventName}>{event.departedName}</Text>
-                      <View style={[
-                        styles.statusTag,
-                        event.status === 'pending' && styles.statusTagPending,
-                        event.status === 'approved' && styles.statusTagApproved,
-                        event.status === 'rejected' && styles.statusTagRejected,
-                      ]}>
-                        <Text style={[
-                          styles.statusTagText,
-                          event.status === 'pending' && styles.statusTagTextPending,
-                          event.status === 'approved' && styles.statusTagTextApproved,
-                          event.status === 'rejected' && styles.statusTagTextRejected,
-                        ]}>
-                          {event.status === 'pending' ? 'Pending Approval' : 
-                           event.status === 'approved' ? 'Approved' : 'Rejected'}
+                      <Text style={styles.eventName} numberOfLines={1} ellipsizeMode="tail">
+                        {event.departedName}
+                      </Text>
+                      <View style={styles.statusTag}>
+                        <View style={[
+                          styles.statusDot,
+                          event.status === 'pending' && styles.statusDotPending,
+                          event.status === 'approved' && styles.statusDotApproved,
+                          event.status === 'rejected' && styles.statusDotRejected,
+                        ]} />
+                        <Text style={styles.statusTagText} numberOfLines={1}>
+                          {event.status === 'pending' ? 'Pending' : 
+                            event.status === 'approved' ? 'Approved' : 'Rejected'}
                         </Text>
                       </View>
                     </View>
                     <View style={styles.eventDateTime}>
-                      <Ionicons name="calendar-outline" size={16} color="#666666" />
-                      <Text style={styles.eventDateTimeText}>
-                        {event.date} at {event.time}
+                      <Ionicons name="calendar-outline" size={14} color="#999999" />
+                      <Text style={styles.eventDateTimeText} numberOfLines={1}>
+                        {formatEventDateTime(event.date, event.time)}
                       </Text>
                     </View>
                   </View>
                   <TouchableOpacity 
                     style={styles.viewDetailsButton}
                     onPress={() => handleViewDetails(event)}
+                    activeOpacity={0.7}
                   >
-                    <Text style={styles.viewDetailsButtonText}>View Details</Text>
+                    <Text style={styles.viewDetailsButtonText}>View</Text>
                   </TouchableOpacity>
                 </View>
               ))}
@@ -352,12 +375,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.1,
   },
   eventsList: {
-    gap: 16,
+    flexDirection: 'column',
   },
   eventCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 20,
+    borderRadius: 16,
+    padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -371,69 +394,79 @@ const styles = StyleSheet.create({
     elevation: 4,
     borderWidth: 1,
     borderColor: '#F0F0F0',
+    marginBottom: 12,
   },
   eventContent: {
     flex: 1,
+    marginRight: 12,
+    minWidth: 0,
   },
   eventHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    justifyContent: 'space-between',
+    marginBottom: 6,
   },
   eventName: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: '#1A1A1A',
-    marginRight: 12,
+    marginRight: 8,
     flex: 1,
+    minWidth: 0,
   },
   statusTag: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
   },
-  statusTagPending: {
-    backgroundColor: '#F0F0F0',
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
-  statusTagApproved: {
-    backgroundColor: '#E8F5E8',
+  statusDotPending: {
+    backgroundColor: '#FFA726',
   },
-  statusTagRejected: {
-    backgroundColor: '#FFE8E8',
+  statusDotApproved: {
+    backgroundColor: '#4CAF50',
+  },
+  statusDotRejected: {
+    backgroundColor: '#F44336',
   },
   statusTagText: {
     fontSize: 12,
     fontWeight: '600',
-  },
-  statusTagTextPending: {
     color: '#666666',
-  },
-  statusTagTextApproved: {
-    color: '#4CAF50',
-  },
-  statusTagTextRejected: {
-    color: '#F44336',
+    marginLeft: 5,
   },
   eventDateTime: {
+    flex: 1,
+    display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 'auto',
   },
   eventDateTimeText: {
-    fontSize: 14,
-    color: '#666666',
+    fontSize: 13,
+    color: '#999999',
     marginLeft: 6,
+    flex: 1,
+    minWidth: 0,
   },
   viewDetailsButton: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
     borderWidth: 1,
     borderColor: '#F7C97B',
+    flexShrink: 0,
   },
   viewDetailsButtonText: {
     color: '#F7C97B',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
   },
 });
