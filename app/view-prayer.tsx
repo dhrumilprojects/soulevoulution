@@ -4,17 +4,17 @@ import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import prayerEventService, { PrayerEvent } from '../services/prayerEventService';
 
@@ -255,8 +255,16 @@ export default function PendingApprovalScreen() {
               <TouchableOpacity
                 style={styles.goLiveButton}
                 onPress={() => {
-                  // TODO: Implement go live functionality
-                  Alert.alert('Go Live', 'Starting the prayer event live stream...');
+                  if (!eventId) {
+                    Alert.alert('Error', 'Event ID not found');
+                    return;
+                  }
+                  router.push({
+                    pathname: '/live-stream',
+                    params: {
+                      eventId: String(eventId),
+                    },
+                  });
                 }}
                 activeOpacity={0.8}
               >
