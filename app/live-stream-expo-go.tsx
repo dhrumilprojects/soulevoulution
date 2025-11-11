@@ -1,48 +1,50 @@
 /**
- * Live Stream Screen - Production Version with Audio
+ * Live Stream Screen - Expo Go Compatible Version
  * 
- * This version uses react-native-vision-camera for real-time video streaming
- * with audio support. Requires a development build (not Expo Go).
+ * This version uses expo-camera instead of react-native-vision-camera
+ * to support Expo Go. It uses takePictureAsync in a loop to capture frames.
+ * 
+ * Note: This approach has limitations:
+ * - Lower frame rate (max ~10-15 fps)
+ * - Higher battery usage
+ * - Less smooth than vision-camera
+ * 
+ * For production, use the vision-camera version (live-stream.tsx) with a development build.
  */
 
 import { Ionicons } from '@expo/vector-icons';
+import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import { Camera, useCameraDevice, useCameraPermission, useMicrophonePermission, useFrameProcessor } from 'react-native-vision-camera';
-import { runOnJS } from 'react-native-reanimated';
 import muxService, { LiveStream } from '../services/muxService';
 import prayerEventService from '../services/prayerEventService';
 import rtmpStreamingService from '../services/rtmpStreamingService';
 
-export default function LiveStreamScreen() {
+export default function LiveStreamScreenExpoGo() {
   const { eventId } = useLocalSearchParams();
-  const camera = useRef<Camera>(null);
-  const backDevice = useCameraDevice('back');
-  const frontDevice = useCameraDevice('front');
-  const device = cameraPosition === 'back' ? backDevice : frontDevice;
-  const { hasPermission: hasCameraPermission, requestPermission: requestCameraPermission } = useCameraPermission();
-  const { hasPermission: hasMicrophonePermission, requestPermission: requestMicrophonePermission } = useMicrophonePermission();
+  const cameraRef = useRef<CameraView>(null);
+  const [permission, requestPermission] = useCameraPermissions();
+  const frameCaptureInterval = useRef<NodeJS.Timeout | null>(null);
   
   const [liveStream, setLiveStream] = useState<LiveStream | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [eventName, setEventName] = useState<string>('');
   const [streamStatus, setStreamStatus] = useState<'idle' | 'active' | 'disconnected'>('idle');
-  const [cameraPosition, setCameraPosition] = useState<'back' | 'front'>('back');
+  const [facing, setFacing] = useState<CameraType>('back');
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [frameRate, setFrameRate] = useState(0);
   const frameCountRef = useRef(0);
   const lastFrameTimeRef = useRef(Date.now());
-  const isStreamingRef = useRef(false);
 
   useEffect(() => {
     const fetchEvent = async () => {
@@ -93,46 +95,69 @@ export default function LiveStreamScreen() {
     return () => clearInterval(interval);
   }, [liveStream, isStreaming]);
 
-  // Frame processor to send video frames to backend
-  const sendVideoFrame = async (frameBase64: string) => {
-    if (isStreamingRef.current) {
-      await rtmpStreamingService.sendVideoFrame(frameBase64);
-      
-      // Calculate frame rate
-      frameCountRef.current++;
-      const now = Date.now();
-      const elapsed = (now - lastFrameTimeRef.current) / 1000;
-      
-      if (frameCountRef.current === 1) {
-        lastFrameTimeRef.current = now;
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (frameCaptureInterval.current) {
+        clearInterval(frameCaptureInterval.current);
       }
-      
-      if (frameCountRef.current % 30 === 0) {
-        const fps = 30 / elapsed;
-        runOnJS(setFrameRate)(Math.round(fps));
-        console.log(`📊 Sent ${frameCountRef.current} video frames, FPS: ${Math.round(fps)}`);
-        lastFrameTimeRef.current = now;
+    };
+  }, []);
+
+  const captureFrame = async () => {
+    if (!cameraRef.current || !isStreaming) return;
+
+    try {
+      // Capture a photo (we'll use this as a frame)
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.7, // Lower quality for faster processing
+        base64: true,
+        skipProcessing: true, // Skip processing for speed
+      });
+
+      if (photo?.base64) {
+        // Send frame to backend
+        await rtmpStreamingService.sendFrame(photo.base64);
+        
+        // Calculate frame rate
+        frameCountRef.current++;
+        const now = Date.now();
+        const elapsed = (now - lastFrameTimeRef.current) / 1000;
+        
+        if (frameCountRef.current % 30 === 0) {
+          const fps = 30 / elapsed;
+          setFrameRate(Math.round(fps));
+          lastFrameTimeRef.current = now;
+        }
       }
+    } catch (error) {
+      console.error('Error capturing frame:', error);
+      // Don't alert on every frame error to avoid spam
     }
   };
 
-  const frameProcessor = useFrameProcessor((frame) => {
-    'worklet';
-    
-    if (isStreamingRef.current && liveStream) {
-      try {
-        // Convert frame to base64
-        // Note: This is a simplified approach. For production, you may want to:
-        // 1. Use a frame processor plugin for better performance
-        // 2. Compress frames before sending
-        // 3. Implement frame skipping to reduce bandwidth
-        const base64 = frame.toString('base64');
-        runOnJS(sendVideoFrame)(base64);
-      } catch (error) {
-        // Silently handle errors to avoid flooding console
-      }
+  const startFrameCapture = () => {
+    if (frameCaptureInterval.current) {
+      clearInterval(frameCaptureInterval.current);
     }
-  }, [isStreaming, liveStream]);
+
+    // Capture frames at ~10 fps (every 100ms)
+    // Note: Higher rates may cause performance issues
+    const captureInterval = 100; // milliseconds
+    
+    frameCaptureInterval.current = setInterval(() => {
+      captureFrame();
+    }, captureInterval);
+  };
+
+  const stopFrameCapture = () => {
+    if (frameCaptureInterval.current) {
+      clearInterval(frameCaptureInterval.current);
+      frameCaptureInterval.current = null;
+    }
+    frameCountRef.current = 0;
+    setFrameRate(0);
+  };
 
   const handleStartStream = async () => {
     if (!liveStream) {
@@ -140,35 +165,23 @@ export default function LiveStreamScreen() {
       return;
     }
 
-    // Request camera permission
-    if (!hasCameraPermission) {
-      const result = await requestCameraPermission();
-      if (!result) {
+    if (!permission?.granted) {
+      const result = await requestPermission();
+      if (!result.granted) {
         Alert.alert('Permission Denied', 'Camera permission is required to stream');
-        return;
-      }
-    }
-
-    // Request microphone permission
-    if (!hasMicrophonePermission) {
-      const result = await requestMicrophonePermission();
-      if (!result) {
-        Alert.alert('Permission Denied', 'Microphone permission is required for audio streaming');
         return;
       }
     }
 
     try {
       const rtmpUrl = `rtmp://live.mux.com/app/${liveStream.stream_key}`;
-      const success = await rtmpStreamingService.startStream(rtmpUrl, 1280, 720, 2500000, 30);
+      const success = await rtmpStreamingService.startStream(rtmpUrl, 1280, 720, 2500000, 10); // Lower FPS for expo-camera
       
       if (success) {
-        isStreamingRef.current = true;
         setIsStreaming(true);
         setStreamStatus('active');
         setConnectionError(null);
-        frameCountRef.current = 0;
-        lastFrameTimeRef.current = Date.now();
+        startFrameCapture();
       } else {
         setConnectionError('Failed to connect to backend streaming service');
         Alert.alert('Connection Error', 'Failed to connect to backend streaming service. Please check your backend URL configuration.');
@@ -183,7 +196,7 @@ export default function LiveStreamScreen() {
 
   const handleStopStream = async () => {
     try {
-      isStreamingRef.current = false;
+      stopFrameCapture();
       await rtmpStreamingService.stopStream();
       setIsStreaming(false);
       setStreamStatus('disconnected');
@@ -205,26 +218,34 @@ export default function LiveStreamScreen() {
   };
 
   const toggleCameraFacing = () => {
-    setCameraPosition(current => (current === 'back' ? 'front' : 'back'));
+    setFacing(current => (current === 'back' ? 'front' : 'back'));
   };
 
-  if (!hasCameraPermission || !hasMicrophonePermission) {
+  if (!permission) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#F7C97B" />
+          <Text style={styles.loadingText}>Requesting camera permission...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!permission.granted) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.permissionContainer}>
           <Ionicons name="camera-outline" size={64} color="#666666" />
-          <Text style={styles.permissionTitle}>Permissions Required</Text>
+          <Text style={styles.permissionTitle}>Camera Permission Required</Text>
           <Text style={styles.permissionText}>
-            We need access to your camera and microphone to start the live stream.
+            We need access to your camera to start the live stream.
           </Text>
           <TouchableOpacity
             style={styles.permissionButton}
-            onPress={async () => {
-              if (!hasCameraPermission) await requestCameraPermission();
-              if (!hasMicrophonePermission) await requestMicrophonePermission();
-            }}
+            onPress={requestPermission}
           >
-            <Text style={styles.permissionButtonText}>Grant Permissions</Text>
+            <Text style={styles.permissionButtonText}>Grant Permission</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.backButton}
@@ -234,15 +255,6 @@ export default function LiveStreamScreen() {
           </TouchableOpacity>
         </View>
       </SafeAreaView>
-    );
-  }
-
-  if (!device) {
-    return (
-      <View style={styles.container}>
-        <ActivityIndicator size="large" color="#F7C97B" />
-        <Text style={styles.loadingText}>Loading camera...</Text>
-      </View>
     );
   }
 
@@ -272,14 +284,11 @@ export default function LiveStreamScreen() {
         </View>
       ) : (
         <>
-          <Camera
-            ref={camera}
+          <CameraView
+            ref={cameraRef}
             style={styles.camera}
-            device={device}
-            isActive={!isCreating}
-            video={true}
-            audio={true}
-            frameProcessor={isStreaming ? frameProcessor : undefined}
+            facing={facing}
+            mode="picture"
           />
           <View style={styles.overlay}>
             <View style={styles.controls}>
@@ -349,8 +358,11 @@ export default function LiveStreamScreen() {
           )}
           <Text style={styles.infoNote}>
             {isStreaming 
-              ? `Streaming is active with audio. Capturing at ~${frameRate || 30} fps.` 
-              : 'Press "Start Streaming" to begin broadcasting with audio.'}
+              ? `Streaming is active. Capturing frames at ~${frameRate || 10} fps (Expo Go compatible mode).` 
+              : 'Press "Start Streaming" to begin broadcasting from your camera.'}
+          </Text>
+          <Text style={styles.warningText}>
+            ⚠️ Expo Go Mode: Frame rate is limited (~10 fps). For better performance, use a development build with react-native-vision-camera.
           </Text>
         </View>
       )}
@@ -622,4 +634,12 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     lineHeight: 16,
   },
+  warningText: {
+    color: '#FF9800',
+    fontSize: 10,
+    marginTop: 8,
+    fontStyle: 'italic',
+    lineHeight: 14,
+  },
 });
+
