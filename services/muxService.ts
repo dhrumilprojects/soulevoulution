@@ -11,7 +11,7 @@ const extra = (Constants.expoConfig as any)?.extra || {};
 export const muxConfig: MuxConfig = {
   accessTokenId: extra.MUX_ACCESS_TOKEN_ID || '',
   secretKey: extra.MUX_SECRET_KEY || '',
-  apiBaseUrl: 'https://api.mux.com/v1',
+  apiBaseUrl: 'https://api.mux.com',
 };
 
 export interface LiveStream {
@@ -68,22 +68,23 @@ class MuxService {
         return { success: false, error: 'Mux is not configured. Please add MUX_ACCESS_TOKEN_ID and MUX_SECRET_KEY to app.json' };
       }
 
+      const requestBody: any = {
+        playback_policy: ['public'],
+        new_asset_settings: {
+          playback_policy: ['public'],
+        },
+        reconnect_window: 60,
+        reduced_latency: true,
+        latency_mode: 'low',
+      };
+
       const response = await fetch(`${muxConfig.apiBaseUrl}/video/v1/live-streams`, {
         method: 'POST',
         headers: {
           'Authorization': this.getAuthHeader(),
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          playback_policy: ['public'],
-          new_asset_settings: {
-            playback_policy: ['public'],
-          },
-          reconnect_window: 60,
-          reconnect_slate_url: undefined,
-          reduced_latency: true,
-          latency_mode: 'low',
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {

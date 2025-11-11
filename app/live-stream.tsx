@@ -22,6 +22,7 @@ export default function LiveStreamScreen() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [eventName, setEventName] = useState<string>('');
+  const [streamStatus, setStreamStatus] = useState<'idle' | 'active' | 'disconnected'>('idle');
 
   useEffect(() => {
     const fetchEvent = async () => {
@@ -43,10 +44,10 @@ export default function LiveStreamScreen() {
       
       if (result.success && result.liveStream) {
         setLiveStream(result.liveStream);
-        setIsStreaming(true);
+        setStreamStatus(result.liveStream.status || 'idle');
         Alert.alert(
           'Live Stream Created',
-          `Your live stream is ready! RTMP URL: rtmp://live.mux.com/app/${result.liveStream.stream_key}\n\nStream will be available at the playback URL once you start streaming.`,
+          `Your live stream is ready!\n\nRTMP URL: rtmp://live.mux.com/app/${result.liveStream.stream_key}\n\nStatus: ${result.liveStream.status || 'idle'}\n\nThe stream will become active once you start streaming video to the RTMP URL.`,
           [{ text: 'OK' }]
         );
       } else {
@@ -60,16 +61,44 @@ export default function LiveStreamScreen() {
     }
   }, [permission?.granted, eventName]);
 
+  // Poll stream status when streaming is active
+  useEffect(() => {
+    if (!liveStream || !isStreaming) return;
+
+    const checkStatus = async () => {
+      const result = await muxService.getLiveStream(liveStream!.id);
+      if (result.success && result.liveStream) {
+        setStreamStatus(result.liveStream.status || 'idle');
+      }
+    };
+
+    const interval = setInterval(checkStatus, 5000); // Check every 5 seconds
+    checkStatus(); // Check immediately
+
+    return () => clearInterval(interval);
+  }, [liveStream, isStreaming]);
+
   const handleStartStream = async () => {
     if (!liveStream) {
       Alert.alert('Error', 'Live stream not initialized');
       return;
     }
 
-    // Here you would integrate RTMP streaming
-    // For now, we'll just show that streaming has started
+    // RTMP Streaming Implementation Required
+    // To make the stream active, you need to stream video to:
+    // rtmp://live.mux.com/app/{stream_key}
+    // 
+    // For Expo, you'll need to use a library like:
+    // - react-native-livestream (requires native modules)
+    // - Or create a backend service that handles RTMP streaming
+    // - Or use WebRTC if Mux supports it for your use case
+    
     setIsStreaming(true);
-    Alert.alert('Streaming Started', 'Your live stream is now active!');
+    Alert.alert(
+      'Streaming Info',
+      `To start streaming:\n\n1. Use RTMP URL:\nrtmp://live.mux.com/app/${liveStream.stream_key}\n\n2. Stream from OBS, ffmpeg, or an RTMP streaming app\n\n3. The stream status will change to "active" once video is received.\n\nNote: Direct camera streaming requires native RTMP libraries.`,
+      [{ text: 'OK' }]
+    );
   };
 
   const handleStopStream = async () => {
@@ -192,15 +221,27 @@ export default function LiveStreamScreen() {
 
       {liveStream && (
         <View style={styles.infoContainer}>
-          <Text style={styles.infoTitle}>Stream Information</Text>
+          <View style={styles.infoHeader}>
+            <Text style={styles.infoTitle}>Stream Information</Text>
+            <View style={[styles.statusBadge, streamStatus === 'active' && styles.statusBadgeActive]}>
+              <Text style={styles.statusBadgeText}>{streamStatus.toUpperCase()}</Text>
+            </View>
+          </View>
+          <Text style={styles.infoLabel}>RTMP URL:</Text>
           <Text style={styles.infoText}>
-            RTMP URL: rtmp://live.mux.com/app/{liveStream.stream_key}
+            rtmp://live.mux.com/app/{liveStream.stream_key}
           </Text>
           {liveStream.playback_ids && liveStream.playback_ids.length > 0 && (
-            <Text style={styles.infoText}>
-              Playback ID: {liveStream.playback_ids[0].id}
-            </Text>
+            <>
+              <Text style={styles.infoLabel}>Playback ID:</Text>
+              <Text style={styles.infoText}>
+                {liveStream.playback_ids[0].id}
+              </Text>
+            </>
           )}
+          <Text style={styles.infoNote}>
+            Note: Stream will remain "idle" until video is sent to the RTMP URL. Use OBS, ffmpeg, or an RTMP streaming app to broadcast.
+          </Text>
         </View>
       )}
     </SafeAreaView>
@@ -407,17 +448,50 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
     padding: 16,
   },
+  infoHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
   infoTitle: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
-    marginBottom: 8,
+  },
+  statusBadge: {
+    backgroundColor: '#FFA726',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  statusBadgeActive: {
+    backgroundColor: '#4CAF50',
+  },
+  statusBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  infoLabel: {
+    color: '#999999',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 8,
+    marginBottom: 4,
   },
   infoText: {
     color: '#CCCCCC',
     fontSize: 12,
     marginBottom: 4,
     fontFamily: 'monospace',
+  },
+  infoNote: {
+    color: '#FFA726',
+    fontSize: 11,
+    marginTop: 12,
+    fontStyle: 'italic',
+    lineHeight: 16,
   },
 });
 

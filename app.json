@@ -53,8 +53,8 @@
     "extra": {
       "CLOUDINARY_CLOUD_NAME": "dpomxki5z",
       "CLOUDINARY_UPLOAD_PRESET": "soulevolution",
-      "MUX_ACCESS_TOKEN_ID": "YOUR_MUX_ACCESS_TOKEN_ID",
-      "MUX_SECRET_KEY": "YOUR_MUX_SECRET_KEY"
+      "MUX_ACCESS_TOKEN_ID": "bac859f0-da38-48da-bebe-f2a262c57314",
+      "MUX_SECRET_KEY": "wE4Xu+ZemVhiR8UXJNNsjoL2JQnHGZejeL8iWzIYv7Du1WB3CRsKB8eBC+1s7ljq8acsgO5hfRX"
     }
   }
 }
