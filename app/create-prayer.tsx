@@ -101,11 +101,20 @@ export default function CreatePrayerScreen() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const formatDate = (date: Date) => {
+  // Format date for display (dd/mm/yyyy)
+  const formatDateDisplay = (date: Date) => {
     const day = date.getDate().toString().padStart(2, '0');
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
     const year = date.getFullYear();
     return `${day}/${month}/${year}`;
+  };
+
+  // Format date for storage (YYYY-MM-DD)
+  const formatDate = (date: Date) => {
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    return `${year}-${month}-${day}`;
   };
 
   const formatTime = (date: Date) => {
@@ -116,6 +125,7 @@ export default function CreatePrayerScreen() {
 
   const handleDateSelect = (date: Date) => {
     setSelectedDate(date);
+    // Store in YYYY-MM-DD format for backend
     setFormData(prev => ({ ...prev, date: formatDate(date) }));
     setShowDatePicker(false);
   };
@@ -126,11 +136,102 @@ export default function CreatePrayerScreen() {
     setShowTimePicker(false);
   };
 
+  const handleTimeInputChange = (value: string) => {
+    // Remove any non-digit characters except colon
+    const cleaned = value.replace(/[^\d:]/g, '');
+    
+    // Allow empty input (for deletion)
+    if (cleaned.length === 0) {
+      setFormData(prev => ({ ...prev, time: '' }));
+      return;
+    }
+    
+    // Limit to HH:MM format
+    if (cleaned.length <= 5) {
+      // Auto-format as user types
+      let formatted = cleaned;
+      
+      // Handle colon placement
+      if (cleaned.length === 1) {
+        // Single digit - allow it
+        formatted = cleaned;
+      } else if (cleaned.length === 2 && !cleaned.includes(':')) {
+        // Two digits without colon - add colon after
+        formatted = cleaned + ':';
+      } else if (cleaned.length > 2 && !cleaned.includes(':')) {
+        // More than 2 digits without colon - insert colon after 2nd digit
+        formatted = cleaned.slice(0, 2) + ':' + cleaned.slice(2);
+      } else {
+        // Already has colon or other format
+        formatted = cleaned;
+      }
+      
+      // Validate and format only if we have complete parts
+      const parts = formatted.split(':');
+      if (parts.length === 2) {
+        const hoursStr = parts[0];
+        const minutesStr = parts[1];
+        
+        // Allow partial input (empty or incomplete)
+        if (hoursStr.length === 0 || minutesStr.length === 0) {
+          setFormData(prev => ({ ...prev, time: formatted }));
+          return;
+        }
+        
+        const hours = parseInt(hoursStr, 10);
+        const minutes = parseInt(minutesStr, 10);
+        
+        // Check if hours are valid (0-23) when complete
+        if (hoursStr.length === 2 && (hours < 0 || hours > 23)) {
+          // Invalid hours, but allow deletion - just don't auto-format
+          setFormData(prev => ({ ...prev, time: formatted }));
+          return;
+        }
+        
+        // Check if minutes are valid (0-59) when complete
+        if (minutesStr.length === 2 && (minutes < 0 || minutes > 59)) {
+          // Invalid minutes, but allow deletion - just don't auto-format
+          setFormData(prev => ({ ...prev, time: formatted }));
+          return;
+        }
+        
+        // Format with leading zeros only if both parts are complete
+        if (hoursStr.length === 2 && minutesStr.length === 2) {
+          const formattedHours = hours.toString().padStart(2, '0');
+          const formattedMinutes = minutes.toString().padStart(2, '0');
+          formatted = `${formattedHours}:${formattedMinutes}`;
+        }
+      } else if (parts.length === 1 && formatted.includes(':')) {
+        // Just colon, allow it for deletion purposes
+        formatted = formatted;
+      }
+      
+      setFormData(prev => ({ ...prev, time: formatted }));
+      
+      // Update selectedTime if valid complete time
+      if (formatted.match(/^\d{2}:\d{2}$/)) {
+        const [hours, minutes] = formatted.split(':').map(Number);
+        if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+          const newTime = new Date();
+          newTime.setHours(hours, minutes, 0, 0);
+          setSelectedTime(newTime);
+        }
+      }
+    }
+  };
+
   const handleNext = async () => {
     if (step === 1) {
       // Validate required fields for step 1
       if (!formData.departedName || !formData.date || !formData.time) {
         Alert.alert('Required Fields', 'Please fill in all required fields marked with *');
+        return;
+      }
+      
+      // Validate time format (HH:MM)
+      const timePattern = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
+      if (!timePattern.test(formData.time)) {
+        Alert.alert('Invalid Time', 'Please enter a valid time in HH:MM format (e.g., 14:30)');
         return;
       }
     } else if (step === 3) {
@@ -297,43 +398,49 @@ export default function CreatePrayerScreen() {
       </View>
 
       {/* Date and Time Row */}
-      <View style={styles.rowContainer}>
-        <View style={[styles.inputGroup, styles.halfWidth]}>
-          <Text style={styles.label}>Date *</Text>
-          <TouchableOpacity 
-            style={styles.inputWithIcon}
-            onPress={() => setShowDatePicker(true)}
-            activeOpacity={0.7}
-          >
-            <TextInput
-              style={[styles.textInput, styles.inputWithIconText]}
-              placeholder="dd/mm/yyyy"
-              placeholderTextColor="#999999"
-              value={formData.date}
-              editable={false}
-              pointerEvents="none"
-            />
-            <Ionicons name="calendar-outline" size={20} color="#999999" />
-          </TouchableOpacity>
-        </View>
+      <View style={styles.inputGroup}>
+        <Text style={styles.label}>Date and time of prayer meeting *</Text>
+        <View style={styles.rowContainer}>
+          <View style={[styles.inputGroup, styles.halfWidth, { marginBottom: 0 }]}>
+            <TouchableOpacity 
+              style={styles.inputWithIcon}
+              onPress={() => setShowDatePicker(true)}
+              activeOpacity={0.7}
+            >
+              <TextInput
+                style={[styles.textInput, styles.inputWithIconText]}
+                placeholder="dd/mm/yyyy"
+                placeholderTextColor="#999999"
+                value={formData.date}
+                editable={false}
+                pointerEvents="none"
+              />
+              <View style={styles.iconContainer}>
+                <Ionicons name="calendar-outline" size={20} color="#999999" />
+              </View>
+            </TouchableOpacity>
+          </View>
 
-        <View style={[styles.inputGroup, styles.halfWidth]}>
-          <Text style={styles.label}>Time *</Text>
-          <TouchableOpacity 
-            style={styles.inputWithIcon}
-            onPress={() => setShowTimePicker(true)}
-            activeOpacity={0.7}
-          >
-            <TextInput
-              style={[styles.textInput, styles.inputWithIconText]}
-              placeholder="--:--"
-              placeholderTextColor="#999999"
-              value={formData.time}
-              editable={false}
-              pointerEvents="none"
-            />
-            <Ionicons name="time-outline" size={20} color="#999999" />
-          </TouchableOpacity>
+          <View style={[styles.inputGroup, styles.halfWidth, { marginBottom: 0 }]}>
+            <View style={styles.inputWithIcon}>
+              <TextInput
+                style={[styles.textInput, styles.inputWithIconText]}
+                placeholder="hh:mm"
+                placeholderTextColor="#999999"
+                value={formData.time}
+                onChangeText={handleTimeInputChange}
+                keyboardType="numeric"
+                maxLength={5}
+              />
+              <TouchableOpacity 
+                style={styles.iconContainer}
+                onPress={() => setShowTimePicker(true)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="time-outline" size={20} color="#999999" />
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       </View>
 
@@ -522,7 +629,7 @@ export default function CreatePrayerScreen() {
               </TouchableOpacity>
             </View>
             <View style={styles.pickerContent}>
-              <Text style={styles.pickerDateText}>{formatDate(selectedDate)}</Text>
+              <Text style={styles.pickerDateText}>{formatDateDisplay(selectedDate)}</Text>
               <View style={styles.dateButtonsContainer}>
                 <TouchableOpacity 
                   style={styles.dateButton}
@@ -769,7 +876,15 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   inputWithIconText: {
-    paddingRight: 40,
+    paddingRight: 45,
+  },
+  iconContainer: {
+    position: 'absolute',
+    right: 12,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   navigationContainer: {
     flexDirection: 'row',

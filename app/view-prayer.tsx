@@ -1,20 +1,22 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
+import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import prayerEventService, { PrayerEvent } from '../services/prayerEventService';
 
@@ -103,6 +105,138 @@ export default function PendingApprovalScreen() {
     return `${hours}:${minutes}`;
   };
 
+  const formatDateDisplay = (dateStr: string, timeStr: string): string => {
+    try {
+      const dateParts = dateStr.split('-');
+      const timeParts = timeStr.split(':');
+      
+      if (dateParts.length === 3 && timeParts.length >= 2) {
+        const year = parseInt(dateParts[0]);
+        const month = parseInt(dateParts[1]) - 1; // Month is 0-indexed
+        const day = parseInt(dateParts[2]);
+        const hours = parseInt(timeParts[0]);
+        const minutes = parseInt(timeParts[1]);
+        
+        // Format: "Monday, January 15th, 2024 at 2:30 PM"
+        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+          'July', 'August', 'September', 'October', 'November', 'December'];
+        
+        const date = new Date(year, month, day);
+        const dayName = dayNames[date.getDay()];
+        const monthName = monthNames[month];
+        
+        // Add ordinal suffix (st, nd, rd, th)
+        const getOrdinalSuffix = (num: number): string => {
+          const j = num % 10;
+          const k = num % 100;
+          if (j === 1 && k !== 11) return 'st';
+          if (j === 2 && k !== 12) return 'nd';
+          if (j === 3 && k !== 13) return 'rd';
+          return 'th';
+        };
+        
+        const dayWithOrdinal = `${day}${getOrdinalSuffix(day)}`;
+        
+        // Format time in 12-hour format
+        let displayHours = hours;
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        displayHours = hours % 12;
+        if (displayHours === 0) displayHours = 12;
+        const displayMinutes = minutes.toString().padStart(2, '0');
+        
+        return `${dayName}, ${monthName} ${dayWithOrdinal}, ${year} at ${displayHours}:${displayMinutes} ${ampm}`;
+      }
+      return `${dateStr} at ${timeStr}`;
+    } catch (error) {
+      return `${dateStr} at ${timeStr}`;
+    }
+  };
+
+  const handleTimeInputChange = (value: string) => {
+    // Remove any non-digit characters except colon
+    const cleaned = value.replace(/[^\d:]/g, '');
+    
+    // Allow empty input (for deletion)
+    if (cleaned.length === 0) {
+      setEditTime('');
+      return;
+    }
+    
+    // Limit to HH:MM format
+    if (cleaned.length <= 5) {
+      // Auto-format as user types
+      let formatted = cleaned;
+      
+      // Handle colon placement
+      if (cleaned.length === 1) {
+        // Single digit - allow it
+        formatted = cleaned;
+      } else if (cleaned.length === 2 && !cleaned.includes(':')) {
+        // Two digits without colon - add colon after
+        formatted = cleaned + ':';
+      } else if (cleaned.length > 2 && !cleaned.includes(':')) {
+        // More than 2 digits without colon - insert colon after 2nd digit
+        formatted = cleaned.slice(0, 2) + ':' + cleaned.slice(2);
+      } else {
+        // Already has colon or other format
+        formatted = cleaned;
+      }
+      
+      // Validate and format only if we have complete parts
+      const parts = formatted.split(':');
+      if (parts.length === 2) {
+        const hoursStr = parts[0];
+        const minutesStr = parts[1];
+        
+        // Allow partial input (empty or incomplete)
+        if (hoursStr.length === 0 || minutesStr.length === 0) {
+          setEditTime(formatted);
+          return;
+        }
+        
+        const hours = parseInt(hoursStr, 10);
+        const minutes = parseInt(minutesStr, 10);
+        
+        // Check if hours are valid (0-23) when complete
+        if (hoursStr.length === 2 && (hours < 0 || hours > 23)) {
+          // Invalid hours, but allow deletion - just don't auto-format
+          setEditTime(formatted);
+          return;
+        }
+        
+        // Check if minutes are valid (0-59) when complete
+        if (minutesStr.length === 2 && (minutes < 0 || minutes > 59)) {
+          // Invalid minutes, but allow deletion - just don't auto-format
+          setEditTime(formatted);
+          return;
+        }
+        
+        // Format with leading zeros only if both parts are complete
+        if (hoursStr.length === 2 && minutesStr.length === 2) {
+          const formattedHours = hours.toString().padStart(2, '0');
+          const formattedMinutes = minutes.toString().padStart(2, '0');
+          formatted = `${formattedHours}:${formattedMinutes}`;
+        }
+      } else if (parts.length === 1 && formatted.includes(':')) {
+        // Just colon, allow it for deletion purposes
+        formatted = formatted;
+      }
+      
+      setEditTime(formatted);
+      
+      // Update selectedTime if valid complete time
+      if (formatted.match(/^\d{2}:\d{2}$/)) {
+        const [hours, minutes] = formatted.split(':').map(Number);
+        if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+          const newTime = new Date();
+          newTime.setHours(hours, minutes, 0, 0);
+          setSelectedTime(newTime);
+        }
+      }
+    }
+  };
+
   // Check if event is live (within 2 hours after event start time)
   const isEventLive = (): boolean => {
     if (!event?.date || !event?.time) return false;
@@ -172,6 +306,74 @@ export default function PendingApprovalScreen() {
 
   const handleBackToDashboard = () => {
     router.replace('/(tabs)');
+  };
+
+  const formatDateTimeForShare = (dateStr: string, timeStr: string): string => {
+    try {
+      const dateParts = dateStr.split('-');
+      const timeParts = timeStr.split(':');
+      
+      if (dateParts.length === 3 && timeParts.length >= 2) {
+        const date = new Date(
+          parseInt(dateParts[0]),
+          parseInt(dateParts[1]) - 1,
+          parseInt(dateParts[2]),
+          parseInt(timeParts[0]),
+          parseInt(timeParts[1])
+        );
+        return date.toLocaleString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+      }
+      return `${dateStr} at ${timeStr}`;
+    } catch {
+      return `${dateStr} at ${timeStr}`;
+    }
+  };
+
+  const handleShare = async () => {
+    if (!event || !event.meetingCode) {
+      Alert.alert('Error', 'Meeting code not available');
+      return;
+    }
+
+    try {
+      const eventDate = event.date || initialFromParams?.date;
+      const eventTime = event.time || initialFromParams?.time;
+      const formattedDateTime = formatDateTimeForShare(eventDate, eventTime);
+      const departedName = event.departedName || initialFromParams?.name;
+      
+      // TODO: Update this URL to your actual web app URL (e.g., https://soulevolution-web.vercel.app)
+      const webAppUrl = 'https://soulevolution-web.vercel.app'; // Replace with your actual web app URL
+      const streamUrl = `${webAppUrl}/stream/${event.meetingCode}`;
+      
+      const message = `Join us for a prayer meeting in memory of ${departedName}\n\n📿 Meeting Code: ${event.meetingCode}\n📅 Date & Time: ${formattedDateTime}\n\nJoin the live stream: ${streamUrl}`;
+
+      const result = await Share.share({
+        message: message,
+        title: 'Prayer Meeting Invitation',
+      });
+
+      if (result.action === Share.sharedAction) {
+        if (result.activityType) {
+          // Shared with activity type of result.activityType
+          console.log('Shared via:', result.activityType);
+        } else {
+          // Shared
+          console.log('Shared successfully');
+        }
+      } else if (result.action === Share.dismissedAction) {
+        // Dismissed
+        console.log('Share dismissed');
+      }
+    } catch (error) {
+      console.error('Error sharing:', error);
+      Alert.alert('Error', 'Failed to share meeting details');
+    }
   };
 
   return (
@@ -254,17 +456,42 @@ export default function PendingApprovalScreen() {
             {event?.status === 'approved' && isEventLive() && (
               <TouchableOpacity
                 style={styles.goLiveButton}
-                onPress={() => {
+                onPress={async () => {
                   if (!eventId) {
                     Alert.alert('Error', 'Event ID not found');
                     return;
                   }
-                  router.push({
-                    pathname: '/live-stream',
-                    params: {
-                      eventId: String(eventId),
-                    },
-                  });
+                  
+                  try {
+                    // Generate unique streaming session ID
+                    const streamingSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                    
+                    // Update Firebase with streaming session
+                    const updateResult = await prayerEventService.updateStreamingSession(String(eventId), streamingSessionId);
+                    
+                    if (!updateResult.success) {
+                      Alert.alert('Error', updateResult.error || 'Failed to create streaming session');
+                      return;
+                    }
+                    
+                    // Open web app for broadcasting
+                    // TODO: Update this URL to your actual web app URL (e.g., https://soulevolution-web.vercel.app)
+                    const webAppUrl = `http://localhost:5173/broadcast/${eventId}?session=${streamingSessionId}`;
+                    const canOpen = await Linking.canOpenURL(webAppUrl);
+                    
+                    if (canOpen) {
+                      await Linking.openURL(webAppUrl);
+                    } else {
+                      Alert.alert(
+                        'Cannot Open Browser',
+                        `Please open this URL in your browser:\n\n${webAppUrl}`,
+                        [{ text: 'OK' }]
+                      );
+                    }
+                  } catch (error) {
+                    console.error('Error starting stream:', error);
+                    Alert.alert('Error', 'Failed to start streaming. Please try again.');
+                  }
                 }}
                 activeOpacity={0.8}
               >
@@ -280,13 +507,17 @@ export default function PendingApprovalScreen() {
             
             <View style={styles.eventDetailsList}>
               <View style={styles.eventDetailItem}>
-                <Text style={styles.eventDetailLabel}>Name:</Text>
+                <View style={styles.labelRow}>
+                  <Ionicons name="person-outline" size={16} color="#666666" />
+                  <Text style={[styles.eventDetailLabel, { marginLeft: 6 }]}>Departed Soul</Text>
+                </View>
                 {isEditing ? (
                   <TextInput
                     style={styles.input}
                     value={editName}
                     onChangeText={setEditName}
-                    placeholder="Name"
+                    placeholder="Enter name"
+                    placeholderTextColor="#999999"
                   />
                 ) : (
                   <Text style={styles.eventDetailValue}>{event?.departedName || initialFromParams?.name}</Text>
@@ -294,9 +525,9 @@ export default function PendingApprovalScreen() {
               </View>
               
               <View style={styles.eventDetailItem}>
-                <View style={styles.dateRow}>
+                <View style={styles.labelRow}>
                   <Ionicons name="calendar-outline" size={16} color="#666666" />
-                  <Text style={styles.eventDetailLabel}>Date:</Text>
+                  <Text style={[styles.eventDetailLabel, { marginLeft: 6 }]}>Date & Time</Text>
                 </View>
                 {isEditing ? (
                   <View style={styles.dateTimeRow}>
@@ -310,36 +541,84 @@ export default function PendingApprovalScreen() {
                       <Text style={styles.pickerButtonText}>{editDate || 'Select Date'}</Text>
                       <Ionicons name="calendar-outline" size={18} color="#666666" />
                     </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.input, styles.inputHalf, styles.pickerButton]}
-                      onPress={() => {
-                        setSelectedTime(parseTimeString(editTime));
-                        setShowTimePicker(true);
-                      }}
-                    >
-                      <Text style={styles.pickerButtonText}>{editTime || 'Select Time'}</Text>
-                      <Ionicons name="time-outline" size={18} color="#666666" />
-                    </TouchableOpacity>
+                    <View style={[styles.input, styles.inputHalf, styles.inputWithIcon]}>
+                      <TextInput
+                        style={[styles.inputText, styles.inputWithIconText]}
+                        placeholder="hh:mm"
+                        placeholderTextColor="#999999"
+                        value={editTime}
+                        onChangeText={handleTimeInputChange}
+                        keyboardType="numeric"
+                        maxLength={5}
+                      />
+                      <TouchableOpacity
+                        style={styles.iconContainer}
+                        onPress={() => {
+                          setSelectedTime(parseTimeString(editTime));
+                          setShowTimePicker(true);
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="time-outline" size={18} color="#666666" />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 ) : (
                   <Text style={styles.eventDetailValue}>
-                    {(event?.date || initialFromParams?.date)} at {(event?.time || initialFromParams?.time)}
+                    {formatDateDisplay(
+                      event?.date || initialFromParams?.date || '',
+                      event?.time || initialFromParams?.time || ''
+                    )}
                   </Text>
                 )}
               </View>
+
+              {/* Meeting Code - Only show if approved and has meeting code */}
+              {event?.status === 'approved' && event?.meetingCode && (
+                <View style={styles.eventDetailItem}>
+                  <View style={styles.labelRow}>
+                    <Ionicons name="key-outline" size={16} color="#666666" />
+                    <Text style={[styles.eventDetailLabel, { marginLeft: 6 }]}>Meeting Code</Text>
+                  </View>
+                  <View style={styles.meetingCodeContainer}>
+                    <View style={styles.meetingCodeContent}>
+                      <Text style={styles.meetingCodeText}>{event.meetingCode}</Text>
+                      <TouchableOpacity
+                        style={styles.shareButton}
+                        onPress={handleShare}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="share-outline" size={18} color="#F7C97B" />
+                        <Text style={[styles.shareButtonText, { marginLeft: 6 }]}>Share</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={styles.meetingCodeHint}>
+                      Share this code with others to join the prayer meeting
+                    </Text>
+                  </View>
+                </View>
+              )}
               
               <View style={styles.eventDetailItem}>
-                <Text style={styles.eventDetailLabel}>Message:</Text>
+                <View style={styles.labelRow}>
+                  <Ionicons name="chatbubble-outline" size={16} color="#666666" />
+                  <Text style={[styles.eventDetailLabel, { marginLeft: 6 }]}>Memorial Message</Text>
+                </View>
                 {isEditing ? (
                   <TextInput
                     style={[styles.input, styles.inputMultiline]}
                     value={editMessage}
                     onChangeText={setEditMessage}
-                    placeholder="Message"
+                    placeholder="Enter memorial message..."
+                    placeholderTextColor="#999999"
                     multiline
+                    numberOfLines={4}
+                    textAlignVertical="top"
                   />
                 ) : (
-                  <Text style={styles.eventDetailValue}>{event?.memorialMessage || initialFromParams?.message}</Text>
+                  <Text style={styles.eventDetailValue}>
+                    {event?.memorialMessage || initialFromParams?.message || 'No message provided'}
+                  </Text>
                 )}
               </View>
 
@@ -489,6 +768,14 @@ export default function PendingApprovalScreen() {
               style={[styles.dashboardButton, saving && { opacity: 0.7 }]}
               onPress={async () => {
                 if (!eventId) return;
+                
+                // Validate time format (HH:MM)
+                const timePattern = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
+                if (editTime && !timePattern.test(editTime.trim())) {
+                  Alert.alert('Invalid Time', 'Please enter a valid time in HH:MM format (e.g., 14:30)');
+                  return;
+                }
+                
                 try {
                   setSaving(true);
                   const updates: any = {
@@ -653,15 +940,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    padding: 24,
-    paddingBottom: 100,
+    padding: 16,
+    paddingBottom: 80,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 32,
-    paddingTop: 8,
+    marginBottom: 16,
+    paddingTop: 4,
   },
   backButton: {
     flexDirection: 'row',
@@ -691,7 +978,7 @@ const styles = StyleSheet.create({
   mainCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
-    padding: 32,
+    padding: 20,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -705,23 +992,23 @@ const styles = StyleSheet.create({
   },
   statusSection: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 20,
   },
   clockIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: '#F8F8F8',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   statusTag: {
     backgroundColor: '#F0F0F0',
-    paddingHorizontal: 16,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
     borderRadius: 20,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   statusTagApproved: {
     backgroundColor: '#E8F5E8',
@@ -751,15 +1038,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666666',
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: 20,
     letterSpacing: 0.2,
-    marginBottom: 20,
+    marginBottom: 12,
   },
   goLiveButton: {
     backgroundColor: '#F7C97B',
     borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 24,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -783,20 +1070,19 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   eventDetailsSection: {
-    marginBottom: 32,
-  },
-  eventDetailsTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1A1A1A',
     marginBottom: 20,
   },
+  eventDetailsTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    marginBottom: 12,
+  },
   eventDetailsList: {
-    gap: 16,
+    // gap handled by eventDetailItem borderBottom
   },
   mediaBlock: {
-    marginTop: 8,
-    gap: 8,
+    marginTop: 16,
   },
   mediaHeaderRow: {
     flexDirection: 'row',
@@ -887,34 +1173,39 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   eventDetailItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
+    flexDirection: 'column',
+    paddingVertical: 12,
+    paddingHorizontal: 2,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
   },
   eventDetailLabel: {
-    fontSize: 16,
+    fontSize: 13,
     color: '#666666',
-    fontWeight: '500',
+    fontWeight: '600',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   eventDetailValue: {
-    fontSize: 16,
+    fontSize: 15,
     color: '#1A1A1A',
-    fontWeight: '600',
-    flex: 1,
-    textAlign: 'right',
+    fontWeight: '500',
+    lineHeight: 22,
+    flexWrap: 'wrap',
   },
   input: {
-    flex: 1,
+    width: '100%',
     borderWidth: 1,
     borderColor: '#E6E6E6',
-    borderRadius: 10,
-    paddingHorizontal: 12,
+    borderRadius: 8,
+    paddingHorizontal: 10,
     paddingVertical: 10,
-    fontSize: 16,
+    fontSize: 15,
     color: '#1A1A1A',
-    textAlign: 'right',
+    textAlign: 'left',
     backgroundColor: '#FFFFFF',
+    marginTop: 4,
   },
   inputMultiline: {
     minHeight: 90,
@@ -922,7 +1213,8 @@ const styles = StyleSheet.create({
   },
   dateTimeRow: {
     flexDirection: 'row',
-    gap: 12,
+    justifyContent: 'space-between',
+    marginTop: 4,
   },
   inputHalf: {
     flex: 0.48,
@@ -938,24 +1230,94 @@ const styles = StyleSheet.create({
     color: '#1A1A1A',
     flex: 1,
   },
+  inputText: {
+    flex: 1,
+    fontSize: 16,
+    color: '#1A1A1A',
+    textAlign: 'left',
+  },
+  inputWithIcon: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  inputWithIconText: {
+    paddingRight: 40,
+    textAlign: 'left',
+  },
+  iconContainer: {
+    position: 'absolute',
+    right: 12,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  labelRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   dashboardButton: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: '#F7C97B',
+    marginTop: 12,
   },
   dashboardButtonText: {
     color: '#F7C97B',
     fontSize: 16,
     fontWeight: '700',
     letterSpacing: 0.3,
+  },
+  meetingCodeContainer: {
+    backgroundColor: '#F8F8F8',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#F7C97B',
+    marginTop: 6,
+  },
+  meetingCodeContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  meetingCodeText: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    letterSpacing: 3,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  shareButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#F7C97B',
+  },
+  shareButtonText: {
+    color: '#F7C97B',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  meetingCodeHint: {
+    fontSize: 12,
+    color: '#666666',
+    fontStyle: 'italic',
+    marginTop: 4,
   },
 });

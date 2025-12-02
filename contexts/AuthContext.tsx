@@ -44,12 +44,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   useEffect(() => {
     const initializeAuth = async () => {
       try {
+        console.log('[AuthContext] Initializing auth...');
         const currentUser = await authService.getCurrentUser();
+        console.log('[AuthContext] User loaded:', currentUser ? 'User found' : 'No user');
         setUser(currentUser);
       } catch (error) {
-        console.error('Error initializing auth:', error);
+        console.error('[AuthContext] Error initializing auth:', error);
         setUser(null);
       } finally {
+        console.log('[AuthContext] Auth initialization complete');
         setLoading(false);
       }
     };

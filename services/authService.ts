@@ -26,6 +26,7 @@ export interface User {
   createdAt: any;
   lastLoginAt: any;
   isActive: boolean;
+  expiresAt?: number; // Timestamp in milliseconds
 }
 
 export interface OTPRecord {
@@ -136,13 +137,20 @@ class AuthService {
       await deleteDoc(otpDoc.ref);
 
       if (userResult.success) {
-        // Store user in AsyncStorage
-        await AsyncStorage.setItem(this.STORAGE_KEY, JSON.stringify(userResult.user));
+        // Add expiry timestamp (7 days from now)
+        const expiresAt = Date.now() + (7 * 24 * 60 * 60 * 1000); // 7 days in milliseconds
+        const userWithExpiry = {
+          ...userResult.user,
+          expiresAt
+        };
+        
+        // Store user in AsyncStorage with expiry
+        await AsyncStorage.setItem(this.STORAGE_KEY, JSON.stringify(userWithExpiry));
         
         return {
           success: true,
           message: 'OTP verified successfully',
-          user: userResult.user
+          user: userWithExpiry
         };
       } else {
         return userResult;
@@ -228,10 +236,49 @@ class AuthService {
   // Get current user from AsyncStorage
   async getCurrentUser(): Promise<User | null> {
     try {
+      console.log('[AuthService] Getting current user from AsyncStorage...');
       const userString = await AsyncStorage.getItem(this.STORAGE_KEY);
-      return userString ? JSON.parse(userString) : null;
+      
+      if (!userString) {
+        console.log('[AuthService] No user found in AsyncStorage');
+        return null;
+      }
+
+      console.log('[AuthService] User data found, parsing...');
+      const user = JSON.parse(userString) as User;
+      
+      // For backward compatibility: if no expiry exists, set one (7 days from now)
+      // This handles users who logged in before expiry was implemented
+      if (!user.expiresAt) {
+        console.log('[AuthService] User data missing expiry, setting 7-day expiry');
+        const expiresAt = Date.now() + (7 * 24 * 60 * 60 * 1000);
+        const userWithExpiry = { ...user, expiresAt };
+        await AsyncStorage.setItem(this.STORAGE_KEY, JSON.stringify(userWithExpiry));
+        console.log('[AuthService] User expiry set, returning user');
+        return userWithExpiry;
+      }
+      
+      // Check if user data has expired
+      const now = Date.now();
+      const expiresAt = user.expiresAt;
+      console.log('[AuthService] Checking expiry - now:', now, 'expiresAt:', expiresAt, 'expired:', now > expiresAt);
+      
+      if (now > expiresAt) {
+        console.log('[AuthService] User session expired, clearing storage');
+        await AsyncStorage.removeItem(this.STORAGE_KEY);
+        return null;
+      }
+
+      console.log('[AuthService] User session valid, returning user');
+      return user;
     } catch (error) {
-      console.error('Error getting current user:', error);
+      console.error('[AuthService] Error getting current user:', error);
+      // Clear corrupted data
+      try {
+        await AsyncStorage.removeItem(this.STORAGE_KEY);
+      } catch (clearError) {
+        console.error('[AuthService] Error clearing corrupted data:', clearError);
+      }
       return null;
     }
   }

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -22,7 +22,14 @@ export default function LoginScreen() {
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [isVerifying, setIsVerifying] = useState(false);
   const [otpData, setOtpData] = useState<any>(null);
-  const { refreshUser } = useAuth();
+  const { user, loading: authLoading, refreshUser } = useAuth();
+  
+  // Redirect if already authenticated
+  React.useEffect(() => {
+    if (!authLoading && user) {
+      router.replace('/(tabs)');
+    }
+  }, [user, authLoading]);
   
   // Refs for OTP inputs
   const otpRefs = useRef<TextInput[]>([]);

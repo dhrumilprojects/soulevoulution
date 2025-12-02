@@ -2,41 +2,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import moment from 'moment';
 import React, { useEffect, useState } from 'react';
-import { Alert, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
-import authService from '../../services/authService';
 import prayerEventService, { PrayerEvent } from '../../services/prayerEventService';
 
 export default function HomeScreen() {
-  const { user, refreshUser } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [events, setEvents] = useState<PrayerEvent[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const handleLogout = async () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: async () => {
-            const result = await authService.signOut();
-            if (result.success) {
-              await refreshUser();
-              router.replace('/login');
-            } else {
-              Alert.alert('Error', result.error || 'Failed to logout');
-            }
-          },
-        },
-      ]
-    );
-  };
 
   const handleCreateEvent = () => {
     router.push('/create-prayer');
@@ -81,24 +55,84 @@ export default function HomeScreen() {
     }
   };
 
+  const isEventDatePassed = (dateStr: string, timeStr: string): boolean => {
+    try {
+      const dateParts = dateStr.split('-');
+      if (dateParts.length !== 3) return false;
+      
+      const timeParts = timeStr.split(':');
+      if (timeParts.length < 2) return false;
+      
+      const year = parseInt(dateParts[0]);
+      const month = parseInt(dateParts[1]) - 1;
+      const day = parseInt(dateParts[2]);
+      const hours = parseInt(timeParts[0]);
+      const minutes = parseInt(timeParts[1]);
+      
+      const eventDateTime = new Date(year, month, day, hours, minutes);
+      // Add 3 hours to event time to determine completion time
+      const eventEndDateTime = new Date(eventDateTime.getTime() + 3 * 60 * 60 * 1000);
+      const now = new Date();
+      
+      // Event is completed if current time is 3 hours after event start time
+      return now > eventEndDateTime;
+    } catch (error) {
+      return false;
+    }
+  };
+
+  const getEventStatus = (event: PrayerEvent): { status: string; displayText: string } => {
+    if (isEventDatePassed(event.date, event.time)) {
+      return { status: 'completed', displayText: 'Completed' };
+    }
+    return {
+      status: event.status,
+      displayText: event.status === 'pending' ? 'Pending' : 
+                   event.status === 'approved' ? 'Approved' : 'Rejected'
+    };
+  };
+
   const handleViewDetails = (event: PrayerEvent) => {
-    router.push({
-      pathname: '/view-prayer',
-      params: {
-        eventId: event.id || '',
-        eventData: JSON.stringify({
-          name: event.departedName,
-          date: event.date,
-          time: event.time,
-          message: event.memorialMessage,
-        }),
-      },
-    });
+    // Check if event is completed (date has passed)
+    const isCompleted = isEventDatePassed(event.date, event.time);
+    
+    if (isCompleted) {
+      router.push({
+        pathname: '/completed-event',
+        params: {
+          eventId: event.id || '',
+        },
+      });
+    } else {
+      router.push({
+        pathname: '/view-prayer',
+        params: {
+          eventId: event.id || '',
+          eventData: JSON.stringify({
+            name: event.departedName,
+            date: event.date,
+            time: event.time,
+            message: event.memorialMessage,
+          }),
+        },
+      });
+    }
   };
 
   useEffect(() => {
+    // Wait for auth to finish loading before checking user
+    if (authLoading) {
+      return;
+    }
+    
+    // Redirect to login if user is not authenticated (e.g., session expired)
+    if (!user) {
+      router.replace('/login');
+      return;
+    }
+    
     fetchEvents();
-  }, [user]);
+  }, [user, authLoading]);
 
   // Refresh events when screen comes into focus
   useEffect(() => {
@@ -114,14 +148,8 @@ export default function HomeScreen() {
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <Text style={styles.title}>Dashboard</Text>
-            <Text style={styles.subtitle}>Manage your prayer events</Text>
-          </View>
-          <TouchableOpacity style={styles.logoutButton} onPress={() => handleLogout()}>
-            <Ionicons name="log-out-outline" size={16} color="#333333" />
-            <Text style={styles.logoutText}>Logout</Text>
-          </TouchableOpacity>
+          <Text style={styles.title}>Dashboard</Text>
+          <Text style={styles.subtitle}>Manage your prayer events</Text>
         </View>
 
         {/* Create New Prayer Event Section */}
@@ -156,26 +184,28 @@ export default function HomeScreen() {
             </View>
           ) : (
             <View style={styles.eventsList}>
-              {events.map((event) => (
-                <View key={event.id} style={styles.eventCard}>
-                  <View style={styles.eventContent}>
-                    <View style={styles.eventHeader}>
-                      <Text style={styles.eventName} numberOfLines={1} ellipsizeMode="tail">
-                        {event.departedName}
-                      </Text>
-                      <View style={styles.statusTag}>
-                        <View style={[
-                          styles.statusDot,
-                          event.status === 'pending' && styles.statusDotPending,
-                          event.status === 'approved' && styles.statusDotApproved,
-                          event.status === 'rejected' && styles.statusDotRejected,
-                        ]} />
-                        <Text style={styles.statusTagText} numberOfLines={1}>
-                          {event.status === 'pending' ? 'Pending' : 
-                            event.status === 'approved' ? 'Approved' : 'Rejected'}
+              {events.map((event) => {
+                const eventStatus = getEventStatus(event);
+                return (
+                  <View key={event.id} style={styles.eventCard}>
+                    <View style={styles.eventContent}>
+                      <View style={styles.eventHeader}>
+                        <Text style={styles.eventName} numberOfLines={1} ellipsizeMode="tail">
+                          {event.departedName}
                         </Text>
+                        <View style={styles.statusTag}>
+                          <View style={[
+                            styles.statusDot,
+                            eventStatus.status === 'pending' && styles.statusDotPending,
+                            eventStatus.status === 'approved' && styles.statusDotApproved,
+                            eventStatus.status === 'rejected' && styles.statusDotRejected,
+                            eventStatus.status === 'completed' && styles.statusDotCompleted,
+                          ]} />
+                          <Text style={styles.statusTagText} numberOfLines={1}>
+                            {eventStatus.displayText}
+                          </Text>
+                        </View>
                       </View>
-                    </View>
                     <View style={styles.eventDateTime}>
                       <Ionicons name="calendar-outline" size={14} color="#999999" />
                       <Text style={styles.eventDateTimeText} numberOfLines={1}>
@@ -191,7 +221,8 @@ export default function HomeScreen() {
                     <Text style={styles.viewDetailsButtonText}>View</Text>
                   </TouchableOpacity>
                 </View>
-              ))}
+                );
+              })}
             </View>
           )}
         </View>
@@ -213,14 +244,8 @@ const styles = StyleSheet.create({
     paddingBottom: 100, // Extra space for bottom tabs
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
     marginBottom: 32,
     paddingTop: 8,
-  },
-  headerLeft: {
-    flex: 1,
   },
   title: {
     fontSize: 36,
@@ -234,28 +259,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#666666',
     letterSpacing: 0.2,
-  },
-  logoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  logoutText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#333333',
-    marginLeft: 6,
   },
   createEventCard: {
     backgroundColor: '#FFFFFF',
@@ -428,6 +431,9 @@ const styles = StyleSheet.create({
   },
   statusDotRejected: {
     backgroundColor: '#F44336',
+  },
+  statusDotCompleted: {
+    backgroundColor: '#9E9E9E',
   },
   statusTagText: {
     fontSize: 12,

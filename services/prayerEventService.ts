@@ -27,6 +27,7 @@ export interface PrayerEvent {
   aadharCard?: string;
   deathCertificate?: string;
   status: 'pending' | 'approved' | 'rejected';
+  meetingCode?: string; // 6-digit unique code for web viewers
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -43,6 +44,25 @@ export interface CreatePrayerEventData {
   deathCertificate?: string;
 }
 
+export interface EventViewer {
+  id?: string;
+  eventId: string;
+  userId?: string;
+  userName?: string;
+  phoneNumber?: string;
+  viewedAt: Timestamp;
+}
+
+export interface Condolence {
+  id?: string;
+  eventId: string;
+  userId?: string;
+  userName?: string;
+  phoneNumber?: string;
+  message: string;
+  createdAt: Timestamp;
+}
+
 class PrayerEventService {
   private collectionName = 'prayerEvents';
 
@@ -56,9 +76,57 @@ class PrayerEventService {
     return copy as T;
   }
 
-  async createPrayerEvent(userId: string, eventData: CreatePrayerEventData): Promise<{ success: boolean; eventId?: string; error?: string }> {
+  // Generate a random 6-digit code
+  private generateMeetingCode(): string {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  // Check if a meeting code already exists
+  private async isMeetingCodeUnique(code: string): Promise<boolean> {
+    try {
+      const q = query(
+        collection(db, this.collectionName),
+        where('meetingCode', '==', code)
+      );
+      const querySnapshot = await getDocs(q);
+      return querySnapshot.empty; // Returns true if code doesn't exist
+    } catch (error) {
+      console.error('Error checking meeting code uniqueness:', error);
+      // If there's an error, assume it's unique to avoid blocking
+      return true;
+    }
+  }
+
+  // Generate a unique meeting code
+  private async generateUniqueMeetingCode(): Promise<string> {
+    let attempts = 0;
+    const maxAttempts = 10; // Prevent infinite loops
+    
+    while (attempts < maxAttempts) {
+      const code = this.generateMeetingCode();
+      const isUnique = await this.isMeetingCodeUnique(code);
+      
+      if (isUnique) {
+        return code;
+      }
+      
+      attempts++;
+      console.log(`[PrayerEventService] Meeting code ${code} already exists, generating new one...`);
+    }
+    
+    // Fallback: use timestamp-based code if all random attempts fail
+    const timestampCode = Date.now().toString().slice(-6);
+    console.log(`[PrayerEventService] Using timestamp-based code: ${timestampCode}`);
+    return timestampCode;
+  }
+
+  async createPrayerEvent(userId: string, eventData: CreatePrayerEventData): Promise<{ success: boolean; eventId?: string; meetingCode?: string; error?: string }> {
     try {
       const now = Timestamp.now();
+      
+      // Generate unique meeting code
+      const meetingCode = await this.generateUniqueMeetingCode();
+      console.log(`[PrayerEventService] Generated meeting code: ${meetingCode}`);
       
       const prayerEvent: Omit<PrayerEvent, 'id'> = this.pruneUndefined({
         userId,
@@ -72,6 +140,7 @@ class PrayerEventService {
         aadharCard: eventData.aadharCard,
         deathCertificate: eventData.deathCertificate,
         status: 'pending',
+        meetingCode,
         createdAt: now,
         updatedAt: now,
       });
@@ -81,6 +150,7 @@ class PrayerEventService {
       return {
         success: true,
         eventId: docRef.id,
+        meetingCode,
       };
     } catch (error) {
       console.error('Error creating prayer event:', error);
@@ -150,6 +220,40 @@ class PrayerEventService {
     }
   }
 
+  // Get prayer event by meeting code
+  async getPrayerEventByMeetingCode(meetingCode: string): Promise<{ success: boolean; event?: PrayerEvent; error?: string }> {
+    try {
+      const q = query(
+        collection(db, this.collectionName),
+        where('meetingCode', '==', meetingCode)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        const doc = querySnapshot.docs[0];
+        return {
+          success: true,
+          event: {
+            id: doc.id,
+            ...doc.data(),
+          } as PrayerEvent,
+        };
+      } else {
+        return {
+          success: false,
+          error: 'Prayer event not found with this meeting code',
+        };
+      }
+    } catch (error) {
+      console.error('Error fetching prayer event by meeting code:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to fetch prayer event',
+      };
+    }
+  }
+
   async updatePrayerEventStatus(eventId: string, status: 'pending' | 'approved' | 'rejected'): Promise<{ success: boolean; error?: string }> {
     try {
       const docRef = doc(db, this.collectionName, eventId);
@@ -200,6 +304,24 @@ class PrayerEventService {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to delete prayer event',
+      };
+    }
+  }
+
+  async updateStreamingSession(eventId: string, streamingSessionId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const docRef = doc(db, this.collectionName, eventId);
+      await updateDoc(docRef, {
+        streamingSessionId,
+        updatedAt: Timestamp.now(),
+      });
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating streaming session:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to update streaming session',
       };
     }
   }
@@ -268,6 +390,136 @@ class PrayerEventService {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to upload image',
+      };
+    }
+  }
+
+  // Track event viewer
+  async trackEventViewer(eventId: string, userId?: string, userName?: string, phoneNumber?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Get all viewers for this event to check for duplicates
+      const allViewersQuery = query(
+        collection(db, 'eventViewers'),
+        where('eventId', '==', eventId)
+      );
+      const existingViewers = await getDocs(allViewersQuery);
+      
+      // Check if this user/phone already viewed
+      let alreadyViewed = false;
+      existingViewers.forEach((doc) => {
+        const data = doc.data();
+        if ((userId && data.userId === userId) || 
+            (phoneNumber && data.phoneNumber === phoneNumber)) {
+          alreadyViewed = true;
+        }
+      });
+      
+      if (!alreadyViewed) {
+        // Create new viewer record
+        await addDoc(collection(db, 'eventViewers'), {
+          eventId,
+          userId: userId || null,
+          userName: userName || null,
+          phoneNumber: phoneNumber || null,
+          viewedAt: Timestamp.now(),
+        });
+      }
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error tracking event viewer:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to track viewer',
+      };
+    }
+  }
+
+  // Get event viewers
+  async getEventViewers(eventId: string): Promise<{ success: boolean; viewers?: EventViewer[]; error?: string }> {
+    try {
+      const q = query(
+        collection(db, 'eventViewers'),
+        where('eventId', '==', eventId),
+        orderBy('viewedAt', 'desc')
+      );
+      
+      const querySnapshot = await getDocs(q);
+      const viewers: EventViewer[] = [];
+      
+      querySnapshot.forEach((doc) => {
+        viewers.push({
+          id: doc.id,
+          ...doc.data(),
+        } as EventViewer);
+      });
+      
+      return {
+        success: true,
+        viewers,
+      };
+    } catch (error) {
+      console.error('Error fetching event viewers:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to fetch viewers',
+      };
+    }
+  }
+
+  // Add condolence
+  async addCondolence(eventId: string, message: string, userId?: string, userName?: string, phoneNumber?: string): Promise<{ success: boolean; condolenceId?: string; error?: string }> {
+    try {
+      const docRef = await addDoc(collection(db, 'condolences'), {
+        eventId,
+        userId: userId || null,
+        userName: userName || null,
+        phoneNumber: phoneNumber || null,
+        message,
+        createdAt: Timestamp.now(),
+      });
+      
+      return {
+        success: true,
+        condolenceId: docRef.id,
+      };
+    } catch (error) {
+      console.error('Error adding condolence:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to add condolence',
+      };
+    }
+  }
+
+  // Get condolences for an event
+  async getCondolences(eventId: string): Promise<{ success: boolean; condolences?: Condolence[]; error?: string }> {
+    try {
+      const q = query(
+        collection(db, 'condolences'),
+        where('eventId', '==', eventId),
+        orderBy('createdAt', 'desc')
+      );
+      
+      const querySnapshot = await getDocs(q);
+      const condolences: Condolence[] = [];
+      
+      querySnapshot.forEach((doc) => {
+        condolences.push({
+          id: doc.id,
+          ...doc.data(),
+        } as Condolence);
+      });
+      
+      return {
+        success: true,
+        condolences,
+      };
+    } catch (error) {
+      console.error('Error fetching condolences:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to fetch condolences',
       };
     }
   }
