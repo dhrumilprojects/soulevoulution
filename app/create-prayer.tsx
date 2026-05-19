@@ -311,7 +311,7 @@ export default function CreatePrayerScreen() {
 
       // Create prayer event in Firestore
       const eventData = {
-        userName: formData.yourName || user.phoneNumber || 'Anonymous',
+        userName: formData.yourName || user.displayName || user.email || 'Anonymous',
         departedName: formData.departedName,
         date: formData.date,
         time: formData.time,

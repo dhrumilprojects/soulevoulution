@@ -42,13 +42,10 @@ export default function SettingsScreen() {
     );
   };
 
-  const formatPhoneNumber = (phone?: string): string => {
-    if (!phone) return 'Not available';
-    // Format +91XXXXXXXXXX to +91 XXXXX XXXXX
-    if (phone.startsWith('+91') && phone.length === 13) {
-      return `${phone.substring(0, 3)} ${phone.substring(3, 8)} ${phone.substring(8)}`;
-    }
-    return phone;
+  const getDisplayLabel = (): string => {
+    if (user?.displayName) return user.displayName;
+    if (user?.email) return user.email;
+    return 'Not available';
   };
 
   return (
@@ -66,12 +63,12 @@ export default function SettingsScreen() {
               <Ionicons name="person" size={40} color="#FFFFFF" />
             </View>
             <View style={styles.userInfo}>
-              <Text style={styles.userLabel}>Phone Number</Text>
-              <Text style={styles.userPhone}>{formatPhoneNumber(user.phoneNumber)}</Text>
-              {user.userName && (
+              <Text style={styles.userLabel}>Account</Text>
+              <Text style={styles.userPhone}>{getDisplayLabel()}</Text>
+              {user.email && user.displayName && (
                 <>
-                  <Text style={styles.userLabel}>Name</Text>
-                  <Text style={styles.userName}>{user.userName}</Text>
+                  <Text style={styles.userLabel}>Email</Text>
+                  <Text style={styles.userName}>{user.email}</Text>
                 </>
               )}
               {user.id && (

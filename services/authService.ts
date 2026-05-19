@@ -1,295 +1,182 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-    collection,
-    deleteDoc,
-    doc,
-    getDoc,
-    getDocs,
-    query,
-    serverTimestamp,
-    setDoc,
-    updateDoc,
-    where
+  createUserWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithCredential,
+  signInWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  updateProfile,
+  type User as FirebaseUser,
+} from 'firebase/auth';
+import {
+  doc,
+  getDoc,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
 } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { auth, db } from '../config/firebase';
 
 export interface AuthResult {
   success: boolean;
   message?: string;
-  user?: any;
+  user?: User;
   error?: string;
 }
 
 export interface User {
   id: string;
-  phoneNumber: string;
-  createdAt: any;
-  lastLoginAt: any;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+  createdAt?: unknown;
+  lastLoginAt?: unknown;
   isActive: boolean;
-  expiresAt?: number; // Timestamp in milliseconds
 }
 
-export interface OTPRecord {
-  phoneNumber: string;
-  otp: string;
-  expiresAt: any;
-  attempts: number;
-  createdAt: any;
+function mapFirebaseUser(firebaseUser: FirebaseUser): Omit<User, 'createdAt' | 'lastLoginAt' | 'isActive'> {
+  return {
+    id: firebaseUser.uid,
+    email: firebaseUser.email,
+    displayName: firebaseUser.displayName,
+    photoURL: firebaseUser.photoURL,
+  };
+}
+
+export function getFirebaseAuthErrorMessage(error: unknown): string {
+  const code = (error as { code?: string })?.code;
+  switch (code) {
+    case 'auth/invalid-email':
+      return 'Please enter a valid email address.';
+    case 'auth/user-disabled':
+      return 'This account has been disabled.';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':
+      return 'Invalid email or password.';
+    case 'auth/email-already-in-use':
+      return 'An account with this email already exists.';
+    case 'auth/weak-password':
+      return 'Password must be at least 6 characters.';
+    case 'auth/too-many-requests':
+      return 'Too many attempts. Please try again later.';
+    case 'auth/popup-closed-by-user':
+      return 'Sign-in was cancelled.';
+    default:
+      return error instanceof Error ? error.message : 'Authentication failed. Please try again.';
+  }
 }
 
 class AuthService {
   private readonly USERS_COLLECTION = 'users';
-  private readonly OTP_COLLECTION = 'otp_records';
-  private readonly STORAGE_KEY = 'current_user';
 
-  // Generate 6-digit OTP
-  private generateOTP(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+  async syncUserProfile(firebaseUser: FirebaseUser): Promise<User> {
+    const userRef = doc(db, this.USERS_COLLECTION, firebaseUser.uid);
+    const userSnap = await getDoc(userRef);
+    const profile = mapFirebaseUser(firebaseUser);
+
+    if (!userSnap.exists()) {
+      const userData: User = {
+        ...profile,
+        isActive: true,
+        createdAt: serverTimestamp(),
+        lastLoginAt: serverTimestamp(),
+      };
+      await setDoc(userRef, userData);
+      return userData;
+    }
+
+    await updateDoc(userRef, {
+      email: profile.email,
+      displayName: profile.displayName,
+      photoURL: profile.photoURL,
+      lastLoginAt: serverTimestamp(),
+      isActive: true,
+    });
+
+    const existing = userSnap.data();
+    return {
+      id: firebaseUser.uid,
+      email: profile.email ?? (existing.email as string | null) ?? null,
+      displayName: profile.displayName ?? (existing.displayName as string | null) ?? null,
+      photoURL: profile.photoURL ?? (existing.photoURL as string | null) ?? null,
+      createdAt: existing.createdAt,
+      lastLoginAt: existing.lastLoginAt,
+      isActive: true,
+    };
   }
 
-  // Send OTP to phone number
-  async sendOTP(phoneNumber: string): Promise<AuthResult> {
+  async signInWithEmail(email: string, password: string): Promise<AuthResult> {
     try {
-      const otp = this.generateOTP();
-      const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes from now
-      
-      // Store OTP in Firestore
-      const otpDoc = doc(collection(db, this.OTP_COLLECTION));
-      await setDoc(otpDoc, {
-        phoneNumber,
-        otp,
-        expiresAt,
-        attempts: 0,
-        createdAt: serverTimestamp()
-      });
-
-      // In a real app, you would send SMS here using a service like Twilio
-      console.log(`OTP for ${phoneNumber}: ${otp}`); // For development only
-      
-      return {
-        success: true,
-        message: 'OTP sent successfully',
-        user: { id: otpDoc.id, phoneNumber, otp } // Include OTP for development
-      };
-    } catch (error: any) {
-      console.error('Error sending OTP:', error);
-      return {
-        success: false,
-        error: 'Failed to send OTP. Please try again.'
-      };
+      const trimmedEmail = email.trim().toLowerCase();
+      const credential = await signInWithEmailAndPassword(auth, trimmedEmail, password);
+      const user = await this.syncUserProfile(credential.user);
+      return { success: true, message: 'Signed in successfully', user };
+    } catch (error) {
+      console.error('Error signing in with email:', error);
+      return { success: false, error: getFirebaseAuthErrorMessage(error) };
     }
   }
 
-  // Verify OTP
-  async verifyOTP(phoneNumber: string, otp: string): Promise<AuthResult> {
+  async signUpWithEmail(
+    email: string,
+    password: string,
+    displayName?: string
+  ): Promise<AuthResult> {
     try {
-      // Find OTP record
-      const otpQuery = query(
-        collection(db, this.OTP_COLLECTION),
-        where('phoneNumber', '==', phoneNumber)
-      );
-      const otpSnapshot = await getDocs(otpQuery);
-      
-      if (otpSnapshot.empty) {
-        return {
-          success: false,
-          error: 'OTP not found or expired'
-        };
+      const trimmedEmail = email.trim().toLowerCase();
+      const credential = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
+
+      if (displayName?.trim()) {
+        await updateProfile(credential.user, { displayName: displayName.trim() });
       }
 
-      const otpDoc = otpSnapshot.docs[0];
-      const otpData = otpDoc.data() as OTPRecord;
-
-      // Check if OTP is expired
-      if (new Date() > otpData.expiresAt.toDate()) {
-        await deleteDoc(otpDoc.ref);
-        return {
-          success: false,
-          error: 'OTP has expired. Please request a new one.'
-        };
-      }
-
-      // Check attempts limit
-      if (otpData.attempts >= 3) {
-        await deleteDoc(otpDoc.ref);
-        return {
-          success: false,
-          error: 'Too many failed attempts. Please request a new OTP.'
-        };
-      }
-
-      // Verify OTP
-      if (otpData.otp !== otp) {
-        // Increment attempts
-        await updateDoc(otpDoc.ref, {
-          attempts: otpData.attempts + 1
-        });
-        return {
-          success: false,
-          error: 'Invalid OTP code'
-        };
-      }
-
-      // OTP is valid, create or update user
-      const userResult = await this.createOrUpdateUser(phoneNumber);
-      
-      // Delete OTP record
-      await deleteDoc(otpDoc.ref);
-
-      if (userResult.success) {
-        // Add expiry timestamp (7 days from now)
-        const expiresAt = Date.now() + (7 * 24 * 60 * 60 * 1000); // 7 days in milliseconds
-        const userWithExpiry = {
-          ...userResult.user,
-          expiresAt
-        };
-        
-        // Store user in AsyncStorage with expiry
-        await AsyncStorage.setItem(this.STORAGE_KEY, JSON.stringify(userWithExpiry));
-        
-        return {
-          success: true,
-          message: 'OTP verified successfully',
-          user: userWithExpiry
-        };
-      } else {
-        return userResult;
-      }
-    } catch (error: any) {
-      console.error('Error verifying OTP:', error);
-      return {
-        success: false,
-        error: 'Failed to verify OTP. Please try again.'
-      };
+      const user = await this.syncUserProfile(credential.user);
+      return { success: true, message: 'Account created successfully', user };
+    } catch (error) {
+      console.error('Error signing up with email:', error);
+      return { success: false, error: getFirebaseAuthErrorMessage(error) };
     }
   }
 
-  // Create or update user
-  private async createOrUpdateUser(phoneNumber: string): Promise<AuthResult> {
+  async signInWithGoogleIdToken(idToken: string): Promise<AuthResult> {
     try {
-      // Check if user exists
-      const userQuery = query(
-        collection(db, this.USERS_COLLECTION),
-        where('phoneNumber', '==', phoneNumber)
-      );
-      const userSnapshot = await getDocs(userQuery);
-
-      let userData: User;
-
-      if (userSnapshot.empty) {
-        // Create new user
-        const userDoc = doc(collection(db, this.USERS_COLLECTION));
-        userData = {
-          id: userDoc.id,
-          phoneNumber,
-          createdAt: serverTimestamp(),
-          lastLoginAt: serverTimestamp(),
-          isActive: true
-        };
-        await setDoc(userDoc, userData);
-      } else {
-        // Update existing user
-        const userDoc = userSnapshot.docs[0];
-        userData = {
-          id: userDoc.id,
-          phoneNumber,
-          createdAt: userDoc.data().createdAt,
-          lastLoginAt: serverTimestamp(),
-          isActive: true
-        };
-        await updateDoc(userDoc.ref, {
-          lastLoginAt: serverTimestamp(),
-          isActive: true
-        });
-      }
-
-      return {
-        success: true,
-        user: userData
-      };
-    } catch (error: any) {
-      console.error('Error creating/updating user:', error);
-      return {
-        success: false,
-        error: 'Failed to create user account'
-      };
+      const credential = GoogleAuthProvider.credential(idToken);
+      const result = await signInWithCredential(auth, credential);
+      const user = await this.syncUserProfile(result.user);
+      return { success: true, message: 'Signed in with Google', user };
+    } catch (error) {
+      console.error('Error signing in with Google:', error);
+      return { success: false, error: getFirebaseAuthErrorMessage(error) };
     }
   }
 
-  // Sign out user
   async signOut(): Promise<AuthResult> {
     try {
-      await AsyncStorage.removeItem(this.STORAGE_KEY);
-      return {
-        success: true,
-        message: 'Signed out successfully'
-      };
-    } catch (error: any) {
+      await firebaseSignOut(auth);
+      return { success: true, message: 'Signed out successfully' };
+    } catch (error) {
       console.error('Error signing out:', error);
-      return {
-        success: false,
-        error: 'Failed to sign out'
-      };
+      return { success: false, error: getFirebaseAuthErrorMessage(error) };
     }
   }
 
-  // Get current user from AsyncStorage
   async getCurrentUser(): Promise<User | null> {
+    const firebaseUser = auth.currentUser;
+    if (!firebaseUser) {
+      return null;
+    }
     try {
-      console.log('[AuthService] Getting current user from AsyncStorage...');
-      const userString = await AsyncStorage.getItem(this.STORAGE_KEY);
-      
-      if (!userString) {
-        console.log('[AuthService] No user found in AsyncStorage');
-        return null;
-      }
-
-      console.log('[AuthService] User data found, parsing...');
-      const user = JSON.parse(userString) as User;
-      
-      // For backward compatibility: if no expiry exists, set one (7 days from now)
-      // This handles users who logged in before expiry was implemented
-      if (!user.expiresAt) {
-        console.log('[AuthService] User data missing expiry, setting 7-day expiry');
-        const expiresAt = Date.now() + (7 * 24 * 60 * 60 * 1000);
-        const userWithExpiry = { ...user, expiresAt };
-        await AsyncStorage.setItem(this.STORAGE_KEY, JSON.stringify(userWithExpiry));
-        console.log('[AuthService] User expiry set, returning user');
-        return userWithExpiry;
-      }
-      
-      // Check if user data has expired
-      const now = Date.now();
-      const expiresAt = user.expiresAt;
-      console.log('[AuthService] Checking expiry - now:', now, 'expiresAt:', expiresAt, 'expired:', now > expiresAt);
-      
-      if (now > expiresAt) {
-        console.log('[AuthService] User session expired, clearing storage');
-        await AsyncStorage.removeItem(this.STORAGE_KEY);
-        return null;
-      }
-
-      console.log('[AuthService] User session valid, returning user');
-      return user;
+      return await this.syncUserProfile(firebaseUser);
     } catch (error) {
-      console.error('[AuthService] Error getting current user:', error);
-      // Clear corrupted data
-      try {
-        await AsyncStorage.removeItem(this.STORAGE_KEY);
-      } catch (clearError) {
-        console.error('[AuthService] Error clearing corrupted data:', clearError);
-      }
+      console.error('Error loading current user:', error);
       return null;
     }
   }
 
-  // Check if user is authenticated
   async isAuthenticated(): Promise<boolean> {
-    const user = await this.getCurrentUser();
-    return !!user;
+    return !!auth.currentUser;
   }
 
-  // Get user by ID from Firestore
   async getUserById(userId: string): Promise<User | null> {
     try {
       const userDoc = await getDoc(doc(db, this.USERS_COLLECTION, userId));

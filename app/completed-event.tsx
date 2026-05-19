@@ -32,8 +32,8 @@ export default function CompletedEventScreen() {
         prayerEventService.trackEventViewer(
           String(eventId),
           user.id,
-          user.phoneNumber,
-          user.phoneNumber
+          user.displayName || user.email || undefined,
+          user.email || undefined
         );
       }
     }

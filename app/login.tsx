@@ -1,11 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Google from 'expo-auth-session/providers/google';
+import Constants from 'expo-constants';
 import { router } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import * as WebBrowser from 'expo-web-browser';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -15,242 +19,239 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import authService from '../services/authService';
 
+WebBrowser.maybeCompleteAuthSession();
+
+const extra = (Constants.expoConfig as { extra?: Record<string, string> })?.extra ?? {};
+
 export default function LoginScreen() {
-  const [phoneNumber, setPhoneNumber] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [showOTP, setShowOTP] = useState(false);
-  const [otp, setOtp] = useState(['', '', '', '', '', '']);
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [otpData, setOtpData] = useState<any>(null);
-  const { user, loading: authLoading, refreshUser } = useAuth();
-  
-  // Redirect if already authenticated
-  React.useEffect(() => {
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const { user, loading: authLoading } = useAuth();
+
+  const webClientId = extra.GOOGLE_WEB_CLIENT_ID || '';
+  const iosClientId = extra.GOOGLE_IOS_CLIENT_ID || webClientId;
+  const androidClientId = extra.GOOGLE_ANDROID_CLIENT_ID || webClientId;
+
+  const [googleRequest, googleResponse, promptGoogleSignIn] = Google.useIdTokenAuthRequest({
+    webClientId,
+    iosClientId,
+    androidClientId,
+  });
+
+  useEffect(() => {
     if (!authLoading && user) {
       router.replace('/(tabs)');
     }
   }, [user, authLoading]);
-  
-  // Refs for OTP inputs
-  const otpRefs = useRef<TextInput[]>([]);
 
-  const validatePhoneNumber = (phone: string) => {
-    // Remove all non-digit characters
-    const cleaned = phone.replace(/\D/g, '');
-    // Check if it's exactly 10 digits
-    return cleaned.length === 10;
+  useEffect(() => {
+    if (!googleResponse) {
+      return;
+    }
+    if (googleResponse.type === 'dismiss' || googleResponse.type === 'cancel') {
+      setIsGoogleLoading(false);
+      return;
+    }
+    if (googleResponse.type !== 'success') {
+      setIsGoogleLoading(false);
+      return;
+    }
+
+    const idToken = googleResponse.params.id_token;
+    if (!idToken) {
+      Alert.alert('Error', 'Google sign-in did not return a valid token.');
+      setIsGoogleLoading(false);
+      return;
+    }
+
+    (async () => {
+      const result = await authService.signInWithGoogleIdToken(idToken);
+      setIsGoogleLoading(false);
+      if (result.success) {
+        router.replace('/(tabs)');
+      } else {
+        Alert.alert('Error', result.error || 'Google sign-in failed');
+      }
+    })();
+  }, [googleResponse]);
+
+  const validateForm = (): boolean => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !trimmedEmail.includes('@')) {
+      Alert.alert('Invalid Email', 'Please enter a valid email address.');
+      return false;
+    }
+    if (password.length < 6) {
+      Alert.alert('Invalid Password', 'Password must be at least 6 characters.');
+      return false;
+    }
+    if (isSignUp && !displayName.trim()) {
+      Alert.alert('Name Required', 'Please enter your name to create an account.');
+      return false;
+    }
+    return true;
   };
 
-  const handleSendOTP = async () => {
-    if (!validatePhoneNumber(phoneNumber)) {
-      Alert.alert('Invalid Phone Number', 'Please enter a valid 10-digit mobile number');
+  const handleEmailAuth = async () => {
+    if (!validateForm()) {
       return;
     }
 
     setIsLoading(true);
-    
     try {
-      // Format phone number with country code (assuming India +91)
-      const formattedPhoneNumber = `+91${phoneNumber}`;
-      
-      const result = await authService.sendOTP(formattedPhoneNumber);
-      
+      const result = isSignUp
+        ? await authService.signUpWithEmail(email, password, displayName)
+        : await authService.signInWithEmail(email, password);
+
       if (result.success) {
-        setOtpData(result.user);
-        setShowOTP(true);
-        // For development, show the OTP in console
-        console.log(`Development OTP: ${result.user.otp}`);
-        Alert.alert('OTP Sent', 'A 6-digit code has been sent to your phone number.');
+        router.replace('/(tabs)');
       } else {
-        Alert.alert('Error', result.error || 'Failed to send OTP');
+        Alert.alert('Error', result.error || 'Authentication failed');
       }
     } catch (error) {
-      console.error('Error sending OTP:', error);
-      Alert.alert('Error', 'Failed to send OTP. Please try again.');
+      console.error('Email auth error:', error);
+      Alert.alert('Error', 'Something went wrong. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const formatPhoneNumber = (text: string) => {
-    // Remove all non-digit characters
-    const cleaned = text.replace(/\D/g, '');
-    // Limit to 10 digits
-    const limited = cleaned.slice(0, 10);
-    setPhoneNumber(limited);
-  };
-
-  const handleOTPChange = (value: string, index: number) => {
-    // Only allow single digit
-    if (value.length > 1) {
-      value = value.slice(-1);
-    }
-    
-    const newOtp = [...otp];
-    newOtp[index] = value;
-    setOtp(newOtp);
-
-    // Auto-focus next input
-    if (value && index < 5) {
-      otpRefs.current[index + 1]?.focus();
-    }
-  };
-
-  const handleOTPKeyPress = (key: string, index: number) => {
-    // Handle backspace
-    if (key === 'Backspace' && !otp[index] && index > 0) {
-      otpRefs.current[index - 1]?.focus();
-    }
-  };
-
-  const handleVerifyOTP = async () => {
-    const otpString = otp.join('');
-    if (otpString.length !== 6) {
-      Alert.alert('Invalid OTP', 'Please enter the complete 6-digit OTP');
+  const handleGoogleSignIn = async () => {
+    if (!webClientId) {
+      Alert.alert(
+        'Google Sign-In Not Configured',
+        'Add GOOGLE_WEB_CLIENT_ID (and platform client IDs) to app.json extra. Use the Web client ID from your Firebase project.'
+      );
       return;
     }
 
-    if (!otpData) {
-      Alert.alert('Error', 'No OTP data found. Please try again.');
-      return;
-    }
-
-    setIsVerifying(true);
-    
+    setIsGoogleLoading(true);
     try {
-      const result = await authService.verifyOTP(otpData.phoneNumber, otpString);
-      
-      if (result.success) {
-        // Refresh auth context
-        await refreshUser();
-        Alert.alert('Success', 'OTP verified successfully!', [
-          {
-            text: 'Continue',
-            onPress: () => {
-              // Navigate to main app
-              router.replace('/(tabs)');
-            }
-          }
-        ]);
-      } else {
-        Alert.alert('Error', result.error || 'Failed to verify OTP');
-      }
+      await promptGoogleSignIn();
     } catch (error) {
-      console.error('Error verifying OTP:', error);
-      Alert.alert('Error', 'Failed to verify OTP. Please try again.');
-    } finally {
-      setIsVerifying(false);
+      console.error('Google sign-in error:', error);
+      setIsGoogleLoading(false);
+      Alert.alert('Error', 'Could not start Google sign-in.');
     }
   };
 
-  const handleResendOTP = () => {
-    setShowOTP(false);
-    setOtp(['', '', '', '', '', '']);
-    setOtpData(null);
-    // This will allow user to enter phone number again and resend OTP
-  };
+  const isSubmitDisabled = isLoading || isGoogleLoading;
+  const isGoogleDisabled = isSubmitDisabled || !googleRequest;
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView 
+      <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardAvoidingView}
       >
-        <View style={styles.content}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.card}>
-            {!showOTP ? (
-              <>
-                {/* Phone Icon */}
-                <View style={styles.iconContainer}>
-                  <Ionicons name="call-outline" size={24} color="#D4A04B" />
-                </View>
+            <View style={styles.iconContainer}>
+              <Ionicons name="heart-outline" size={28} color="#D4A04B" />
+            </View>
 
-                {/* Welcome Text */}
-                <Text style={styles.welcomeText}>Welcome</Text>
-                <Text style={styles.subtitleText}>Enter your phone number to continue</Text>
+            <Text style={styles.welcomeText}>Welcome</Text>
+            <Text style={styles.subtitleText}>
+              {isSignUp ? 'Create an account to continue' : 'Sign in to continue'}
+            </Text>
 
-                {/* Phone Number Input */}
-                <View style={styles.inputContainer}>
-                  <Text style={styles.inputLabel}>Phone Number</Text>
-                  <TextInput
-                    style={styles.phoneInput}
-                    placeholder="10-digit mobile number"
-                    placeholderTextColor="#AAAAAA"
-                    value={phoneNumber}
-                    onChangeText={formatPhoneNumber}
-                    keyboardType="phone-pad"
-                    maxLength={10}
-                    autoFocus
-                  />
-                </View>
-
-                {/* Send OTP Button */}
-                <TouchableOpacity
-                  style={[styles.sendButton, isLoading && styles.sendButtonDisabled]}
-                  onPress={handleSendOTP}
-                  disabled={isLoading}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.sendButtonText}>
-                    {isLoading ? 'Sending...' : 'Send OTP'}
-                  </Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                {/* OTP Icon */}
-                <View style={styles.iconContainer}>
-                  <Ionicons name="shield-checkmark-outline" size={24} color="#D4A04B" />
-                </View>
-
-                {/* OTP Text */}
-                <Text style={styles.welcomeText}>Enter OTP</Text>
-                <Text style={styles.subtitleText}>
-                  We've sent a 6-digit code to {phoneNumber}
-                </Text>
-
-                {/* OTP Input Fields */}
-                <View style={styles.otpContainer}>
-                  {otp.map((digit, index) => (
-                    <TextInput
-                      key={index}
-                      ref={(ref) => {
-                        if (ref) {
-                          otpRefs.current[index] = ref;
-                        }
-                      }}
-                      style={styles.otpInput}
-                      value={digit}
-                      onChangeText={(value) => handleOTPChange(value, index)}
-                      onKeyPress={({ nativeEvent }) => handleOTPKeyPress(nativeEvent.key, index)}
-                      keyboardType="numeric"
-                      maxLength={1}
-                      textAlign="center"
-                      autoFocus={index === 0}
-                    />
-                  ))}
-                </View>
-
-                {/* Verify OTP Button */}
-                <TouchableOpacity
-                  style={[styles.sendButton, isVerifying && styles.sendButtonDisabled]}
-                  onPress={handleVerifyOTP}
-                  disabled={isVerifying}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.sendButtonText}>
-                    {isVerifying ? 'Verifying...' : 'Verify OTP & Continue'}
-                  </Text>
-                </TouchableOpacity>
-
-                {/* Resend OTP Link */}
-                <TouchableOpacity onPress={handleResendOTP} style={styles.resendButton}>
-                  <Text style={styles.resendText}>Resend OTP</Text>
-                </TouchableOpacity>
-              </>
+            {isSignUp && (
+              <View style={styles.inputContainer}>
+                <Text style={styles.inputLabel}>Your Name</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your name"
+                  placeholderTextColor="#AAAAAA"
+                  value={displayName}
+                  onChangeText={setDisplayName}
+                  autoCapitalize="words"
+                />
+              </View>
             )}
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Email</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="you@example.com"
+                placeholderTextColor="#AAAAAA"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Password</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="At least 6 characters"
+                placeholderTextColor="#AAAAAA"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                autoCapitalize="none"
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.primaryButton, isSubmitDisabled && styles.buttonDisabled]}
+              onPress={handleEmailAuth}
+              disabled={isSubmitDisabled}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.primaryButtonText}>
+                {isLoading
+                  ? isSignUp
+                    ? 'Creating account...'
+                    : 'Signing in...'
+                  : isSignUp
+                    ? 'Create Account'
+                    : 'Sign In'}
+              </Text>
+            </TouchableOpacity>
+
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.googleButton, isGoogleDisabled && styles.buttonDisabled]}
+              onPress={handleGoogleSignIn}
+              disabled={isGoogleDisabled}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="logo-google" size={20} color="#4285F4" />
+              <Text style={styles.googleButtonText}>
+                {isGoogleLoading ? 'Signing in...' : 'Continue with Google'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.toggleModeButton}
+              onPress={() => setIsSignUp(!isSignUp)}
+              disabled={isSubmitDisabled}
+            >
+              <Text style={styles.toggleModeText}>
+                {isSignUp
+                  ? 'Already have an account? Sign in'
+                  : "Don't have an account? Sign up"}
+              </Text>
+            </TouchableOpacity>
           </View>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -259,126 +260,131 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F5F0', // Warm beige background from image
+    backgroundColor: '#F8F5F0',
   },
   keyboardAvoidingView: {
     flex: 1,
   },
-  content: {
-    flex: 1,
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24, // More generous padding like in image
+    paddingHorizontal: 24,
+    paddingVertical: 32,
   },
   card: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20, // Large rounded corners like in image
-    padding: 32, // Generous padding
+    borderRadius: 20,
+    padding: 32,
     width: '100%',
     maxWidth: 400,
-    alignItems: 'center',
-    // Subtle shadow like in image
+    alignSelf: 'center',
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
     elevation: 8,
   },
   iconContainer: {
-    width: 64, // Larger icon container like in image
+    width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#F7C97B', // Golden yellow background from image
+    backgroundColor: '#F7C97B',
     justifyContent: 'center',
     alignItems: 'center',
+    alignSelf: 'center',
     marginBottom: 24,
   },
   welcomeText: {
-    fontSize: 28, // Large welcome text like in image
-    fontWeight: '700', // Bold weight
-    color: '#333333', // Dark gray text
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#333333',
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitleText: {
-    fontSize: 16, // Medium subtitle text
-    fontWeight: '400',
-    color: '#666666', // Medium gray
-    marginBottom: 32,
+    fontSize: 16,
+    color: '#666666',
+    marginBottom: 28,
     textAlign: 'center',
     lineHeight: 22,
   },
   inputContainer: {
     width: '100%',
-    marginBottom: 24,
+    marginBottom: 16,
   },
   inputLabel: {
-    fontSize: 16, // Larger label text
-    fontWeight: '600', // Semi-bold
-    color: '#333333', // Dark gray
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333333',
     marginBottom: 8,
   },
-  phoneInput: {
+  input: {
     borderWidth: 1,
-    borderColor: '#E0E0E0', // Light gray border
-    borderRadius: 12, // Rounded input field
+    borderColor: '#E0E0E0',
+    borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 14,
     fontSize: 16,
     backgroundColor: '#FFFFFF',
     color: '#333333',
   },
-  sendButton: {
-    backgroundColor: '#F7C97B', // Golden yellow button like in image
-    borderRadius: 12, // Rounded button
+  primaryButton: {
+    backgroundColor: '#F7C97B',
+    borderRadius: 12,
     paddingVertical: 16,
-    paddingHorizontal: 32,
     width: '100%',
     alignItems: 'center',
-    // Subtle button shadow
+    marginTop: 8,
     shadowColor: '#F7C97B',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 4,
   },
-  sendButtonDisabled: {
-    opacity: 0.6,
-  },
-  sendButtonText: {
+  primaryButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '600', // Semi-bold
+    fontWeight: '600',
   },
-  otpContainer: {
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  dividerRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-    paddingHorizontal: 8,
+    alignItems: 'center',
+    marginVertical: 20,
   },
-  otpInput: {
-    width: 45,
-    height: 50,
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E8E8E8',
+  },
+  dividerText: {
+    marginHorizontal: 12,
+    color: '#999999',
+    fontSize: 14,
+  },
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#E0E0E0',
-    borderRadius: 8,
-    fontSize: 18,
-    fontWeight: '600',
+    borderRadius: 12,
+    paddingVertical: 14,
     backgroundColor: '#FFFFFF',
-    color: '#333333',
-    textAlign: 'center',
+    gap: 10,
   },
-  resendButton: {
-    marginTop: 16,
+  googleButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333333',
+  },
+  toggleModeButton: {
+    marginTop: 20,
     paddingVertical: 8,
   },
-  resendText: {
+  toggleModeText: {
     color: '#F7C97B',
     fontSize: 14,
     fontWeight: '500',

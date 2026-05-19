@@ -47,7 +47,8 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -57,7 +58,10 @@
       "CLOUDINARY_CLOUD_NAME": "dpomxki5z",
       "CLOUDINARY_UPLOAD_PRESET": "soulevolution",
       "MUX_ACCESS_TOKEN_ID": "bac859f0-da38-48da-bebe-f2a262c57314",
-      "MUX_SECRET_KEY": "wE4Xu+ZemVhiR8UXJNNsjoL2JQnHGZejeL8iWzIYv7Du1WB3CRsKB8eBC+1s7ljq8acsgO5hfRX"
+      "MUX_SECRET_KEY": "wE4Xu+ZemVhiR8UXJNNsjoL2JQnHGZejeL8iWzIYv7Du1WB3CRsKB8eBC+1s7ljq8acsgO5hfRX",
+      "TWILIO_ACCOUNT_SID": "",
+      "TWILIO_AUTH_TOKEN": "",
+      "TWILIO_VERIFY_SERVICE_SID": ""
     }
   }
 }

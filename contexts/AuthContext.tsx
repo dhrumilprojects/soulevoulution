@@ -1,4 +1,6 @@
+import { onAuthStateChanged } from 'firebase/auth';
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { auth } from '../config/firebase';
 import authService, { User } from '../services/authService';
 
 interface AuthContextType {
@@ -42,22 +44,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   useEffect(() => {
-    const initializeAuth = async () => {
-      try {
-        console.log('[AuthContext] Initializing auth...');
-        const currentUser = await authService.getCurrentUser();
-        console.log('[AuthContext] User loaded:', currentUser ? 'User found' : 'No user');
-        setUser(currentUser);
-      } catch (error) {
-        console.error('[AuthContext] Error initializing auth:', error);
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        try {
+          const profile = await authService.syncUserProfile(firebaseUser);
+          setUser(profile);
+        } catch (error) {
+          console.error('[AuthContext] Error syncing user profile:', error);
+          setUser(null);
+        }
+      } else {
         setUser(null);
-      } finally {
-        console.log('[AuthContext] Auth initialization complete');
-        setLoading(false);
       }
-    };
+      setLoading(false);
+    });
 
-    initializeAuth();
+    return unsubscribe;
   }, []);
 
   const value = {
@@ -67,9 +69,5 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     refreshUser,
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
