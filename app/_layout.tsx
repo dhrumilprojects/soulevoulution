@@ -27,13 +27,20 @@ export default function RootLayout() {
     <AuthProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <AuthGuard>
-          <Stack>
-            <Stack.Screen name="login" options={{ headerShown: false }} />
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="view-prayer" options={{ headerShown: false }} />
-            <Stack.Screen name="completed-event" options={{ headerShown: false }} />
-            <Stack.Screen name="live-stream" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
-            <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="login" />
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="create-prayer" />
+            <Stack.Screen name="view-prayer" />
+            <Stack.Screen name="completed-event" />
+            <Stack.Screen
+              name="live-stream"
+              options={{ presentation: 'fullScreenModal' }}
+            />
+            <Stack.Screen
+              name="modal"
+              options={{ presentation: 'modal', title: 'Modal', headerShown: true }}
+            />
           </Stack>
           <StatusBar style="auto" />
         </AuthGuard>

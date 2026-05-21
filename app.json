@@ -13,7 +13,7 @@
       "infoPlist": {
         "NSCameraUsageDescription": "$(PRODUCT_NAME) needs access to your Camera to stream live video."
       },
-      "bundleIdentifier": "com.dhrumilprojects.soulevoulution"
+      "bundleIdentifier": "com.soulevolution.in"
     },
     "android": {
       "adaptiveIcon": {
@@ -61,7 +61,12 @@
       "MUX_SECRET_KEY": "wE4Xu+ZemVhiR8UXJNNsjoL2JQnHGZejeL8iWzIYv7Du1WB3CRsKB8eBC+1s7ljq8acsgO5hfRX",
       "TWILIO_ACCOUNT_SID": "",
       "TWILIO_AUTH_TOKEN": "",
-      "TWILIO_VERIFY_SERVICE_SID": ""
-    }
+      "TWILIO_VERIFY_SERVICE_SID": "",
+      "router": {},
+      "eas": {
+        "projectId": "d7ff8541-aee6-4383-8373-70c5e5993a37"
+      }
+    },
+    "owner": "dhrumilprojects"
   }
 }
